@@ -1,0 +1,95 @@
+---
+description: Patterns for adding new MCP tools — applies when editing core/, tools/, or server/app.py
+globs: core/*.py, tools/*.py, server/app.py
+alwaysApply: false
+---
+
+# MCP Tool Patterns
+
+## Three-Layer Architecture
+
+Every data source must be split across exactly three layers:
+
+```
+core/<source>_client.py   ← HTTP sessions, auth, caching, connection management
+tools/<source>_tools.py   ← Business logic, data parsing, derived signals
+server/app.py             ← @mcp.tool() wrappers with docstrings Claude reads
+```
+
+### core/ — Client & Session Management
+
+Owns everything below the business logic: auth tokens, HTTP sessions, SSL config,
+instrument caches, retry logic. Tools call into core; core never calls tools.
+
+```python
+# ✅ GOOD — core/nse_client.py
+def nse_fetch(url: str) -> dict | list:
+    session = requests.Session()
+    session.get("https://www.nseindia.com", ...)  # cookie priming
+    return session.get(url, ...).json()
+
+# ❌ BAD — HTTP session inside tools/nse_tools.py
+def get_fii_dii_activity():
+    session = requests.Session()  # belongs in core/, not here
+    session.get("https://www.nseindia.com", ...)
+```
+
+Each new data source layer gets its own `core/<name>_client.py`:
+- `core/kite_client.py`   → Zerodha Kite Connect (Layer 1)
+- `core/nse_client.py`    → NSE public API session (Layer 2)
+- `core/macro_client.py`  → yfinance (Layer 4) — global indices, commodities, forex, yields
+
+### tools/ — Business Logic
+
+Plain functions only — no MCP imports, no HTTP sessions, no auth.
+The `@mcp.tool()` decorator lives in `server/app.py`, not in `tools/`.
+
+```python
+# ✅ GOOD — tools/kite_tools.py
+from core.kite_client import get_kite
+
+def get_quote(symbol: str) -> dict:
+    kite = get_kite()        # delegates session/auth to core/
+    ...
+    return {"ltp": ..., "change": ...}
+
+# ❌ BAD — don't import mcp in tool files; @mcp.tool() belongs in server/app.py
+from mcp.server.fastmcp import FastMCP
+@mcp.tool()
+def get_quote(...): ...
+```
+
+## Tool Registration (server/app.py)
+
+Always wrap with a docstring — Claude reads it to decide when to call the tool.
+
+```python
+# ✅ GOOD
+@mcp.tool()
+def quote(symbol: str) -> dict:
+    """
+    Get a live quote for any NSE/BSE stock or index.
+    Use when user asks about current price, today's change, or session P&L.
+    Examples: quote("RELIANCE"), quote("NIFTY 50")
+    """
+    return get_quote(symbol)
+```
+
+## Error Handling
+
+Tools must return a dict with `"error"` key on failure — never raise unhandled exceptions.
+
+```python
+# ✅ GOOD
+try:
+    raw = kite.quote([instrument])
+except Exception as e:
+    return {"error": str(e), "symbol": symbol}
+
+# ❌ BAD — crashes the MCP server
+raw = kite.quote([instrument])  # unhandled exception
+```
+
+## Return Types
+
+Always return `dict` or `list[dict]`. Include an `"as_of"` timestamp for any live data.

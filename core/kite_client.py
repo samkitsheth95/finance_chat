@@ -1,8 +1,27 @@
 import os
+import ssl
+import urllib3
+import requests
 from kiteconnect import KiteConnect
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# When behind a corporate proxy with SSL inspection, bypass certificate verification.
+# Controlled by KITE_SSL_VERIFY=false in .env or the MCP server env config.
+if os.getenv("KITE_SSL_VERIFY", "true").lower() == "false":
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    ssl._create_default_https_context = ssl._create_unverified_context
+
+    # Patch requests.Session.send so verify=False applies to every outgoing
+    # HTTPS request in this process — including kiteconnect's internal session.
+    _original_send = requests.Session.send
+
+    def _unverified_send(self, request, **kwargs):
+        kwargs["verify"] = False
+        return _original_send(self, request, **kwargs)
+
+    requests.Session.send = _unverified_send
 
 _kite: KiteConnect | None = None
 _instruments_cache: dict[str, list] = {}

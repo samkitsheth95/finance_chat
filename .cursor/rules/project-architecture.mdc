@@ -1,0 +1,50 @@
+---
+description: Core architecture decisions and layer roadmap for the india-markets MCP server
+alwaysApply: true
+---
+
+# india-markets MCP — Architecture
+
+This is a **Model Context Protocol (MCP) server** for Indian financial market analysis.
+Claude calls tools defined here to fetch live data. There is no web UI or REST API.
+
+## Layer Roadmap
+
+| Layer | File | Status |
+|-------|------|--------|
+| 1 — Market Foundation | `tools/kite_tools.py` | ✅ Done |
+| 2 — Institutional Flows | `tools/nse_tools.py` | ✅ Done |
+| 3 — Derivatives / Option Chain | `tools/derivatives_tools.py` | ✅ Done |
+| 4 — Global Macro | `tools/macro_tools.py` | ✅ Done |
+| 5 — News & Sentiment | `tools/news_tools.py` | ✅ Done |
+| 6 — Signal Scoring | `core/signal_scorer.py` + `tools/signal_tools.py` | ✅ Done (Phase 1) |
+
+## Key Decisions Made
+
+- **MCP over REST API** — used because the developer uses Cursor daily; no separate UI needed
+- **Zerodha Kite Connect** — chosen as primary data source (paid, most reliable for NSE)
+- **NSE public scraping** — for FII/DII flows (free, no auth needed via `nsepython`)
+- **No portfolio tracking** — pure market analysis tool; user has no holdings in Kite
+- **Selective context injection** — Claude decides which tools to call per question, not pre-fetched
+- **Signal scoring** — raw data → directional scores (+1/0/-1) before Claude synthesizes
+- **Access token is manual** — Kite token expires daily, user provides it in `.env`
+
+## Directory Layout
+
+```
+core/          ← HTTP sessions, auth, instrument caches (one file per data source)
+tools/         ← Business logic and derived signals (no MCP imports)
+server/app.py  ← MCP server: @mcp.tool() wrappers + system prompt instructions
+scripts/       ← One-off utilities (token refresh, etc.)
+```
+
+Run via `.mcp.json`: `python -m server.app` — the `-m` flag adds the project root to
+`sys.path` so all `from core.x import ...` and `from tools.x import ...` imports work.
+
+## Adding a New Layer
+
+1. Create `tools/<name>_tools.py` with plain functions
+2. If it's a new data source, create `core/<name>_client.py` for session/auth management
+3. Register each function as `@mcp.tool()` in `server/app.py`
+4. Update the system prompt `instructions` in `server/app.py` to mention new capabilities
+5. Update this rule's layer table above

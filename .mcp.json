@@ -2,7 +2,13 @@
   "mcpServers": {
     "india-markets": {
       "command": ".venv/bin/python",
-      "args": ["mcp_server.py"]
+      "args": [
+        "-m",
+        "server.app"
+      ],
+      "env": {
+        "KITE_SSL_VERIFY": "false"
+      }
     }
   }
 }

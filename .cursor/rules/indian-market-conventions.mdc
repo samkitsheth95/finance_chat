@@ -1,0 +1,51 @@
+---
+description: NSE/BSE symbol conventions and Kite API quirks for Indian market data
+globs: tools/*.py, core/*.py
+alwaysApply: false
+---
+
+# Indian Market Data Conventions
+
+## NSE Symbol Formats (Kite)
+
+```python
+"NSE:RELIANCE"     # equity — always CAPS
+"NSE:NIFTY 50"     # index — note the space, not NIFTY50
+"NSE:NIFTY BANK"   # BankNifty index — not BANKNIFTY
+"NSE:INDIA VIX"    # volatility index
+"BSE:SENSEX"       # Sensex is on BSE, not NSE
+"BSE:500325"       # BSE accepts scrip codes too
+```
+
+When no exchange prefix is given, default to `NSE`.
+
+## Kite Instrument Token Cache
+
+`kite.instruments(exchange)` downloads ~1MB and takes ~2s.
+Always use `core/kite_client.get_instruments()` — it caches in memory per session.
+Never call `kite.instruments()` directly inside a tool.
+
+## Access Token
+
+- Expires at end of each trading day (or at midnight)
+- Stored in `.env` as `KITE_ACCESS_TOKEN`
+- User generates it manually each morning
+- If tools return auth errors, the token has expired — tell the user to refresh it
+
+## NSE Public Data (Layer 2+)
+
+FII/DII flows come from NSE's website, not Kite.
+Use `nsepython` library for scraping — it handles NSE's anti-scraping headers.
+Data is only available after ~7 PM IST for the current trading day.
+
+## Market Hours
+
+NSE/BSE: 09:15 AM – 03:30 PM IST, Monday–Friday
+Pre-open: 09:00–09:15 AM IST
+After-hours quotes may show stale prices — always note this in responses.
+
+## F&O Expiry
+
+Weekly: every Thursday (BankNifty, Nifty)
+Monthly: last Thursday of the month
+If Thursday is a holiday, expiry moves to Wednesday.

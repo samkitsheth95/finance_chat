@@ -75,11 +75,15 @@ KITE_ACCESS_TOKEN=your_fresh_access_token_here
 
 ## Add to Cursor
 
-The `.mcp.json` in the project root is already configured. Cursor picks it up
-automatically when you open this folder.
+The `.cursor/mcp.json` in this project is already configured. Cursor picks it
+up automatically when you open this folder.
 
-To verify it's running: open Cursor's MCP panel (Settings → MCP) and check that
-`india-markets` shows a green status.
+To verify it's running:
+  1. Top menu → Cursor → Settings → Cursor Settings
+  2. Look for the MCP section in the left sidebar
+  3. `india-markets` should appear with a green dot
+
+Alternatively: Cmd+Shift+P → type "MCP" → "Cursor: Open MCP Settings"
 
 ## Add to Claude Code
 
