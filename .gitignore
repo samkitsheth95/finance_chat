@@ -1,0 +1,14 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# README notes for collaborators: run this to recreate the venv:
+# python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
