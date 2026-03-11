@@ -93,9 +93,12 @@ def score_max_pain_distance(spot: float, max_pain: float) -> dict:
 
 
 def score_vix(vix: float) -> dict:
-    """India VIX as fear gauge: high = bearish for directional longs."""
+    """India VIX as fear gauge: high = bearish for directional longs.
+
+    VIX ≤ 11 flattened to +0.25 — extreme complacency is not increasingly bullish.
+    """
     s = _lerp(vix, [
-        (10, +0.5), (13, +0.25), (16, 0.0),
+        (11, +0.25), (13, +0.25), (16, 0.0),
         (20, -0.25), (25, -0.75), (30, -1.0),
     ])
     return _make(s, round(vix, 1), f"VIX {vix:.1f}")
@@ -191,6 +194,11 @@ _REGIMES: dict[str, dict] = {
         "focus": "macro",
         "note": "Heavy FII selling driven by macro; focus on DXY, crude, US yields",
     },
+    "correction": {
+        "label": "CORRECTION",
+        "focus": "flows",
+        "note": ">5% drawdown with elevated/rising volatility — FII flows and macro determine recovery vs further downside",
+    },
     "greed": {
         "label": "GREED",
         "focus": "derivatives",
@@ -221,9 +229,19 @@ def detect_regime(
     fii_cash_net_cr: float | None = None,
     nifty_day_range_pct: float | None = None,
     days_to_expiry: int | None = None,
+    # A3: multi-day regime inputs (from daily snapshots)
+    fii_5d_sum_cr: float | None = None,
+    vix_3d_change_pct: float | None = None,
+    drawdown_pct: float | None = None,
+    nifty_vs_200dma_pct: float | None = None,
+    # S2: single-day VIX rate of change
+    vix_change_pct: float | None = None,
 ) -> dict:
     """
-    Priority: extreme_fear > exodus > fear > expiry > greed > sideways > normal.
+    Priority: extreme_fear > exodus > correction > fear > expiry > greed > sideways > normal.
+
+    A3 additions: 5-day FII sum triggers EXODUS, drawdown+VIX triggers CORRECTION,
+    VIX 3-day RoC triggers FEAR.  S2: single-day VIX spike >10% triggers FEAR.
     """
     triggers: list[str] = []
     key = "normal"
@@ -231,12 +249,34 @@ def detect_regime(
     if vix is not None and vix > 30:
         key = "extreme_fear"
         triggers.append(f"VIX {vix:.1f} > 30")
+
     elif fii_cash_net_cr is not None and fii_cash_net_cr < -5000:
         key = "exodus"
         triggers.append(f"FII cash ₹{fii_cash_net_cr:,.0f} Cr (extreme single-day selling)")
+    elif fii_5d_sum_cr is not None and fii_5d_sum_cr < -10_000:
+        key = "exodus"
+        triggers.append(f"FII 5-day cash ₹{fii_5d_sum_cr:,.0f} Cr (persistent heavy selling)")
+
+    elif (drawdown_pct is not None and drawdown_pct < -5.0
+          and ((vix is not None and vix > 18)
+               or (vix_3d_change_pct is not None and vix_3d_change_pct > 10))):
+        key = "correction"
+        triggers.append(f"Drawdown {drawdown_pct:.1f}% from peak")
+        if vix is not None and vix > 18:
+            triggers.append(f"VIX elevated at {vix:.1f}")
+        if vix_3d_change_pct is not None and vix_3d_change_pct > 10:
+            triggers.append(f"VIX 3-day RoC {vix_3d_change_pct:+.1f}%")
+
     elif vix is not None and vix > 22:
         key = "fear"
         triggers.append(f"VIX {vix:.1f} > 22")
+    elif vix_change_pct is not None and vix_change_pct > 10:
+        key = "fear"
+        triggers.append(f"VIX surged {vix_change_pct:+.1f}% today (rapid fear spike)")
+    elif vix_3d_change_pct is not None and vix_3d_change_pct > 25:
+        key = "fear"
+        triggers.append(f"VIX 3-day surge {vix_3d_change_pct:+.1f}% (building fear)")
+
     elif days_to_expiry is not None and days_to_expiry <= 1:
         key = "expiry"
         triggers.append(f"{days_to_expiry}d to expiry — theta decay at maximum")
@@ -248,8 +288,19 @@ def detect_regime(
         key = "sideways"
         triggers.append(f"VIX {vix:.1f} in normal range, day range {nifty_day_range_pct:.1f}%")
 
+    # Supplementary context (appended regardless of regime)
     if days_to_expiry is not None and days_to_expiry <= 3 and key != "expiry":
         triggers.append(f"{days_to_expiry}d to expiry — derivatives carry extra weight")
+
+    if nifty_vs_200dma_pct is not None:
+        if nifty_vs_200dma_pct < -2.0:
+            triggers.append(f"Nifty {nifty_vs_200dma_pct:+.1f}% below 200 DMA")
+        elif nifty_vs_200dma_pct > 5.0:
+            triggers.append(f"Nifty {nifty_vs_200dma_pct:+.1f}% above 200 DMA — strong uptrend")
+
+    if fii_5d_sum_cr is not None and key != "exodus":
+        if fii_5d_sum_cr < -5_000:
+            triggers.append(f"FII 5-day cash ₹{fii_5d_sum_cr:,.0f} Cr (heavy recent selling)")
 
     info = _REGIMES[key].copy()
     info["key"] = key
@@ -264,8 +315,11 @@ def detect_regime(
 #   normal       — Regular trading day, no extreme conditions. All layers balanced.
 #   fear         — VIX > 22. Elevated anxiety. FII flow direction decides market fate.
 #   extreme_fear — VIX > 30. Panic / crash. FII flows dominate; technicals unreliable.
-#   exodus       — FII cash net < -₹5,000 Cr (single day). Macro drives the outflows
-#                  (DXY, crude, US yields). Ask "why are FIIs leaving?", not "what do charts say?"
+#   exodus       — FII cash net < -₹5,000 Cr (single day) OR 5-day sum < -₹10,000 Cr.
+#                  Macro drives the outflows. Ask "why are FIIs leaving?", not "what do charts say?"
+#   correction   — >5% drawdown from peak AND (VIX > 18 or VIX 3-day RoC > 10%).
+#                  FII flows + macro determine if it's a buying opportunity or further downside.
+#   fear         — VIX > 22 OR VIX single-day spike > 10% (S2) OR VIX 3-day surge > 25%.
 #   greed        — VIX < 13 AND PCR < 0.6. Low fear + call complacency. Option writers
 #                  control reversal points; derivatives signals predict the top.
 #   sideways     — VIX 14–20, Nifty day range < 0.8%. Range-bound. Max pain + OI walls
@@ -273,7 +327,7 @@ def detect_regime(
 #   expiry       — ≤1 day to option expiry. Theta decay at max, max pain gravity strongest.
 #
 # Priority (checked top-to-bottom in detect_regime):
-#   extreme_fear > exodus > fear > expiry > greed > sideways > normal
+#   extreme_fear > exodus > correction > fear > expiry > greed > sideways > normal
 #
 # To nudge weights: edit the dict below. Rows must sum to 1.0.
 
@@ -283,6 +337,7 @@ _DEFAULT_WEIGHTS: dict[str, dict[str, float]] = {
     "fear":         {"derivatives": 0.15, "flows": 0.50, "macro": 0.25, "news": 0.10},
     "extreme_fear": {"derivatives": 0.10, "flows": 0.55, "macro": 0.20, "news": 0.15},
     "exodus":       {"derivatives": 0.10, "flows": 0.25, "macro": 0.55, "news": 0.10},
+    "correction":   {"derivatives": 0.15, "flows": 0.40, "macro": 0.30, "news": 0.15},
     "greed":        {"derivatives": 0.55, "flows": 0.20, "macro": 0.15, "news": 0.10},
     "sideways":     {"derivatives": 0.55, "flows": 0.20, "macro": 0.15, "news": 0.10},
     "expiry":       {"derivatives": 0.60, "flows": 0.15, "macro": 0.15, "news": 0.10},
@@ -349,15 +404,44 @@ def find_conflicts(signals: dict) -> list[str]:
 
 # ── Composite ────────────────────────────────────────────────────────
 
+_AGREEMENT_MULTIPLIER = 1.3
+_AGREEMENT_MIN_LAYERS = 3
+_AGREEMENT_THRESHOLD = 0.15  # |score| > this to count as directional
+
+
 def compute_composite(
     layer_scores: dict[str, float | None],
     weights: dict[str, float],
-) -> float:
-    """Weighted average of available layer scores."""
+) -> dict:
+    """
+    Weighted average of available layer scores.
+
+    S1: When ≥3 layers agree on direction, amplify composite by 1.3×
+    (capped at ±1.0). Averaging understates unanimous signals.
+    Returns dict with score plus agreement metadata.
+    """
     total = w_sum = 0.0
     for layer, score in layer_scores.items():
         if score is not None and layer in weights:
             w = weights[layer]
             total += score * w
             w_sum += w
-    return round(total / w_sum, 2) if w_sum else 0.0
+    composite = total / w_sum if w_sum else 0.0
+
+    available = {k: v for k, v in layer_scores.items() if v is not None}
+    bullish_count = sum(1 for v in available.values() if v > _AGREEMENT_THRESHOLD)
+    bearish_count = sum(1 for v in available.values() if v < -_AGREEMENT_THRESHOLD)
+
+    agreement_boost = False
+    if len(available) >= _AGREEMENT_MIN_LAYERS:
+        if bullish_count >= _AGREEMENT_MIN_LAYERS or bearish_count >= _AGREEMENT_MIN_LAYERS:
+            composite *= _AGREEMENT_MULTIPLIER
+            agreement_boost = True
+
+    return {
+        "score": _clamp(composite),
+        "agreement_boost": agreement_boost,
+        "layers_bullish": bullish_count,
+        "layers_bearish": bearish_count,
+        "layers_available": len(available),
+    }

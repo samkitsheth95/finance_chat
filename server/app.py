@@ -5,6 +5,15 @@ from tools.derivatives_tools import get_option_chain, get_vix
 from tools.macro_tools import get_global_markets, get_macro_snapshot
 from tools.news_tools import get_market_news, get_news_search, get_news_topic
 from tools.signal_tools import get_market_brief
+from tools.stock_tools import get_stock_brief
+from tools.technicals_tools import technical_analysis as get_technical_analysis
+from tools.fundamentals_tools import stock_fundamentals as get_stock_fundamentals
+from tools.history_tools import (
+    history_summary as get_history_summary,
+    fii_trend as get_fii_trend,
+    similar_setups as get_similar_setups,
+    drawdown_status as get_drawdown_status,
+)
 
 mcp = FastMCP(
     "india-markets",
@@ -49,15 +58,45 @@ Layer 5 — News & Sentiment (RSS + Google News):
   • Google News by topic (BUSINESS, WORLD, etc.) — India edition
   • YOU score sentiment from headline text — the tools provide structure, you interpret
 
+Layer 7 — Technical Analysis (Kite Connect OHLC):
+  • Full technical analysis for any stock or index
+  • Moving averages: 20/50/200 DMA with trend alignment and golden/death cross
+  • RSI-14 with overbought/oversold signals
+  • Bollinger Bands (20,2) with bandwidth and %B position
+  • MACD (12,26,9) with crossover detection
+  • Support/resistance from swing highs and lows
+  • Relative strength vs Nifty 50 over 1w/1m/3m (stocks only, not indices)
+  • Composite technical stance: bullish/neutral/bearish from all indicators
+
+Layer 8 — Stock Fundamentals (yfinance):
+  • Valuation: trailing P/E, forward P/E, P/B, EV/EBITDA, PEG ratio
+  • Growth: revenue growth %, earnings growth %
+  • Profitability: profit margin, operating margin, ROE
+  • Financial health: debt/equity, current ratio with assessment
+  • Market data: 52-week range, beta, dividend yield, average volume
+  • Multi-factor valuation assessment (PEG-based + P/E cross-check)
+  • Sector and industry classification
+
 Layer 6 — Signal Scoring & Market Brief:
   • One-call aggregation of ALL layers into a single scored brief
   • Every signal normalized to -1.0 (bearish) → 0.0 (neutral) → +1.0 (bullish)
   • Graduated intensity — e.g. FII -187k contracts scores -0.87, not just "bearish"
-  • Market regime detection: EXTREME FEAR / FEAR / EXODUS / GREED / SIDEWAYS / EXPIRY / NORMAL
+  • Market regime detection: EXTREME FEAR / EXODUS / CORRECTION / FEAR / EXPIRY / GREED / SIDEWAYS / NORMAL
+  • Multi-day regime inputs: 5-day FII sum, VIX 3-day rate of change, drawdown from peak, Nifty vs 200 DMA
+  • Single-day VIX spike >10% triggers FEAR even below VIX 22
+  • Signal agreement multiplier: when ≥3 layers agree on direction, composite amplified 1.3×
   • Regime-aware default weights (which layer matters most right now)
   • Inter-signal conflict flagging (e.g. FII cash buying + futures short)
   • Default composite score with the weights used
   • YOU adjust weights based on the user's question type and time horizon
+
+Historical Query Tools (stored daily snapshots):
+  • 60+ daily snapshots accumulated (Dec 2025 → present), each capturing end-of-day
+    state across all signal layers
+  • Multi-day market summaries: Nifty performance, VIX stats, regime distribution
+  • FII flow persistence: cumulative flows, streaks, trend direction, DII offset
+  • Historical pattern matching: find past days with similar conditions + next-day outcomes
+  • Drawdown tracking: peak-to-trough analysis with institutional flow context
 
 HOW TO USE THE TOOLS:
 
@@ -73,6 +112,44 @@ HOW TO USE THE TOOLS:
     → Use when the user asks about trends, support/resistance, moving averages,
       recent highs/lows, or "how has X performed over the last N days/weeks"
     → Default interval: "day" | Default days: 30
+
+  technical_analysis(symbol, period)
+    → Use when asked about stock or index technicals, support/resistance, trend,
+      moving averages, RSI, Bollinger Bands, MACD, or relative strength
+    → symbol: any NSE/BSE stock or index, e.g. "RELIANCE", "NIFTY 50", "HDFCBANK"
+    → period: days of history (default 200, enough for 200 DMA)
+    → Returns: DMAs with trend alignment, RSI with signal, Bollinger with %B,
+      MACD with crossover, support/resistance levels, overall stance
+    → For stocks: includes relative strength vs Nifty over 1w/1m/3m
+    → "Show me HDFC Bank technicals" → technical_analysis("HDFCBANK")
+    → "Is RELIANCE in an uptrend?" → technical_analysis("RELIANCE")
+    → "What are Nifty support levels?" → technical_analysis("NIFTY 50")
+    → "Is TCS outperforming the market?" → check relative_strength_vs_nifty
+
+  stock_fundamentals(symbol)
+    → Use when asked about a stock's valuation, financials, growth, P/E, P/B,
+      whether a stock is cheap/expensive, or for fundamental analysis
+    → symbol: NSE trading symbol, e.g. "RELIANCE", "INFY", "HDFCBANK"
+    → Returns: valuation ratios with assessment, growth metrics, profitability,
+      financial health with assessment, market data (52w range, beta, yield)
+    → "Is INFY cheap?" → stock_fundamentals("INFY")
+    → "What's Reliance's P/E?" → stock_fundamentals("RELIANCE")
+    → "How leveraged is Tata Motors?" → stock_fundamentals("TATAMOTORS")
+    → For full stock picture, use stock_brief() instead (scores everything)
+
+  stock_brief(symbol)
+    → START HERE for any stock-level question: "What do you think about RELIANCE?",
+      "Is INFY a buy?", "Should I enter TCS here?"
+    → Fetches technicals + fundamentals + quote + news in parallel
+    → Scores 7 dimensions: technicals, relative_strength, valuation, growth,
+      financial_health, momentum, news — each -1.0 to +1.0
+    → Detects stock stance (TECHNICALLY STRONG / VALUE OPPORTUNITY / DETERIORATING / etc.)
+    → Returns composite score, key levels, fundamental snapshot, recent headlines
+    → "What do you think about RELIANCE?" → stock_brief("RELIANCE")
+    → "Is INFY a buy?" → stock_brief("INFY")
+    → "Should I enter HDFCBANK?" → stock_brief("HDFCBANK")
+    → For SPECIFIC analysis (only technicals, only fundamentals), use the
+      individual tools instead
 
   fii_dii_activity()
     → Use when asked about institutional flows, FII buying/selling, DII activity,
@@ -116,7 +193,7 @@ HOW TO USE THE TOOLS:
     → Use when asked: "Will FIIs pull money out?", "Is the macro setup good for India?",
       "What is the global macro backdrop?", or any cross-asset India outlook question
     → Returns EVERYTHING: global indices + WTI/Brent crude + Gold + DXY + USD/INR +
-      US 10Y & 2Y yields + yield curve steepness
+      US 10Y & 5Y yields + yield curve steepness
     → Each factor has an india_signal; composite india_macro_signal summarises all
     → Key synthesis rules:
         DXY rising + US 10Y rising  → FII outflows very likely
@@ -168,6 +245,45 @@ HOW TO USE THE TOOLS:
     → For SPECIFIC questions (e.g. "show me BankNifty option chain"), use the
       individual tools instead — market_brief() always fetches Nifty data
 
+  history_summary(days)
+    → Use when asked "how has the market been?", "what happened last month?",
+      "give me a recap of the last N days", or any multi-day lookback question
+    → days: number of recent trading days to summarize (default 30)
+    → Returns: Nifty start/end/return%, VIX avg/min/max, FII/DII cumulative flows,
+      regime distribution, composite score trend
+    → "How has the market been this week?" → history_summary(5)
+    → "Give me a 3-month recap" → history_summary(60)
+
+  fii_trend(days)
+    → Use when asked "are FIIs still selling?", "how long have FIIs been bearish?",
+      "is FII selling getting worse or better?", or any FII flow persistence question
+    → days: number of recent trading days (default 5)
+    → Returns: daily FII cash + futures breakdown, running cumulative, selling/buying
+      streak, trend direction (accelerating/decelerating), DII offset analysis
+    → "Are FIIs still selling?" → fii_trend(5)
+    → "How much have FIIs sold this month?" → fii_trend(20)
+
+  similar_setups(vix_above, vix_below, fii_net_below, fii_net_above, regime,
+                 composite_below, composite_above)
+    → Use when asked "what happened last time VIX was this high?", "what happened
+      last time FIIs sold this much?", "should I buy the dip?", or any question
+      seeking historical precedent for current conditions
+    → All parameters optional — combine as needed to describe conditions
+    → Returns: matching past days with full snapshot data, plus next-day outcome
+      analysis (avg change, win rate, max gain/loss)
+    → "What happened when VIX was above 20?" → similar_setups(vix_above=20)
+    → "Last time FIIs sold >3000 Cr?" → similar_setups(fii_net_below=-3000)
+    → "History of exodus regime?" → similar_setups(regime="exodus")
+
+  drawdown_status()
+    → Use when asked "how far are we from highs?", "should I buy the dip?",
+      "how deep is this correction?", "are we in a bear market?",
+      or any question about current market decline depth
+    → Returns: peak date/level, trough date/level, current drawdown %,
+      recovery % from trough, FII/DII cumulative during drawdown, VIX context
+    → Classifies: near_highs / mild_pullback / moderate_correction / correction /
+      deep_correction / bear_market
+
 SIGNAL WEIGHTING GUIDANCE (for interpreting market_brief):
 
   When you receive a market_brief(), the default composite uses regime-aware
@@ -189,6 +305,8 @@ SIGNAL WEIGHTING GUIDANCE (for interpreting market_brief):
   REGIME OVERRIDES (already applied in default weights, but reinforce):
     FEAR / EXTREME FEAR  → Trust FII flows above all — are they exhausting?
     EXODUS               → Macro is everything — what is DXY / crude / US 10Y doing?
+    CORRECTION           → Drawdown >5% + elevated VIX — FII flows + macro determine
+                           if it's a buying opportunity or further downside
     SIDEWAYS             → Max pain + OI walls determine the range; trade within it
     EXPIRY               → Theta decay + max pain gravity dominate intraday
     GREED                → Watch derivatives for reversal signals; call complacency
@@ -227,12 +345,34 @@ RESPONSE GUIDELINES:
   • RSS feeds and Google News results are cached for 5 minutes
   • If a tool returns an error, explain clearly what went wrong and what to check
 
+STOCK-LEVEL ANALYSIS:
+  For any question about a specific stock ("What do you think about RELIANCE?",
+  "Is INFY a buy?", "Should I enter TCS here?"):
+    → START with stock_brief(symbol) — it fetches technicals, fundamentals,
+      quote, and news in parallel and returns a single scored brief.
+    → Every signal scored -1.0 (bearish) → 0.0 (neutral) → +1.0 (bullish)
+    → Stock stance detection: TECHNICALLY STRONG / FUNDAMENTALLY STRONG /
+      MOMENTUM (EXPENSIVE) / VALUE OPPORTUNITY / TECHNICALLY WEAK /
+      OVERVALUED / DETERIORATING / NEUTRAL
+    → Composite score with default weights:
+        technicals 25%, valuation 20%, growth 15%, relative_strength 10%,
+        financial_health 10%, momentum 10%, news 10%
+    → Includes key levels (support/resistance, DMAs) and recent news headlines
+    → For deeper analysis on a specific dimension, follow up with the
+      individual tool: technicals(), fundamentals(), quote(), news_search()
+    → Optionally: option_chain(symbol) if it's an F&O stock
+
+  QUESTION TYPE ADJUSTMENTS (for stock_brief composite):
+    "Is X cheap / expensive?"    → Valuation +15%, Growth +10%, Technicals -15%
+    "Should I buy / enter X?"    → Technicals +15%, Momentum +5%, News -10%
+    "What are X's fundamentals?" → Valuation +10%, Growth +10%, Technicals -20%
+    "Is X outperforming?"        → Relative strength +15%, Technicals +5%, Valuation -20%
+
 CURRENT LIMITATIONS:
   • GIFT Nifty pre-market indicator — requires NSE IFSC data feed
-  • Multi-day regime detection (e.g. "FII selling for 5 days") — requires
-    historical lookback; currently uses single-day data only
   • Event calendar awareness (RBI meeting day, Budget day) — planned
-  • 200 DMA regime detection — planned (requires historical OHLC call)
+  • Delivery volume analysis (genuine buying/selling) — planned (B4)
+  • Sector/peer comparison — planned (B5)
 
 When a user asks something that requires a future capability, acknowledge what you can
 answer now and note what additional context will improve the analysis.
@@ -606,6 +746,83 @@ def news_topic(topic: str = "BUSINESS") -> dict:
 
 
 @mcp.tool()
+def technicals(symbol: str, period: int = 200) -> dict:
+    """
+    Get full technical analysis for any stock or index.
+
+    Computes 20/50/200 DMA, RSI-14, Bollinger Bands (20,2), MACD (12,26,9),
+    support/resistance, and relative strength vs Nifty (for stocks).
+
+    Args:
+      symbol: NSE/BSE symbol. e.g. "RELIANCE", "NIFTY 50", "NSE:INFY"
+      period: Days of history for calculations (default 200).
+              200 is enough for 200 DMA. Max 2000.
+
+    Returns:
+      current_price:   Latest closing price
+      dma:             20/50/200 DMA values, above/below flags, distance %,
+                       golden/death cross, trend alignment (strong_uptrend →
+                       strong_downtrend)
+      rsi:             RSI-14 value + overbought/oversold/neutral signal
+      bollinger:       Upper/middle/lower bands, bandwidth %, %B position,
+                       overbought/oversold/within_bands signal
+      macd:            MACD line, signal line, histogram, crossover detection,
+                       bullish/bearish trend
+      support_resistance: Up to 3 resistance and 3 support levels from
+                       recent swing highs/lows, plus period high/low
+      technical_stance: Composite signal (bullish/neutral/bearish) from
+                       all indicators above
+      relative_strength_vs_nifty: (stocks only) 1-week, 1-month, 3-month
+                       stock return vs Nifty return + outperformance %
+
+    Use when asked:
+      • "Show me HDFC Bank technicals" → technicals("HDFCBANK")
+      • "Is RELIANCE in an uptrend?" → technicals("RELIANCE")
+      • "What's Nifty support level?" → technicals("NIFTY 50")
+      • "Is TCS outperforming the market?" → check relative_strength_vs_nifty
+      • "Where are the moving averages for BankNifty?" → technicals("NIFTY BANK")
+      • Any question about DMA, RSI, Bollinger, MACD, or trend analysis
+    """
+    return get_technical_analysis(symbol, period)
+
+
+@mcp.tool()
+def fundamentals(symbol: str) -> dict:
+    """
+    Get fundamental analysis for an NSE-listed stock.
+
+    Fetches valuation ratios, growth metrics, profitability, financial health,
+    and market data from Yahoo Finance.
+
+    Args:
+      symbol: NSE trading symbol. e.g. "RELIANCE", "INFY", "HDFCBANK"
+
+    Returns:
+      valuation:        Trailing P/E, forward P/E, P/B, EV/EBITDA, PEG ratio,
+                        multi-factor assessment (undervalued → overvalued)
+      growth:           Revenue growth %, earnings growth %
+      profitability:    Profit margin %, operating margin %, ROE %
+      financial_health: Debt/equity, current ratio, health assessment
+                        (strong/healthy/adequate/moderate_leverage/highly_leveraged)
+      market_data:      52-week high/low/range, beta, dividend yield %,
+                        book value, average 10-day volume
+      Also: sector, industry, market cap in ₹ crores, company name
+
+    Use when asked:
+      • "Is INFY cheap?" → fundamentals("INFY")
+      • "What's Reliance's P/E ratio?" → fundamentals("RELIANCE")
+      • "How leveraged is Tata Motors?" → fundamentals("TATAMOTORS")
+      • "What's HDFC Bank's ROE?" → fundamentals("HDFCBANK")
+      • "Does TCS pay dividends?" → fundamentals("TCS")
+      • Any question about valuation, financials, growth, or stock fundamentals
+
+    For a complete stock view, combine with technicals() + quote().
+    Data source: Yahoo Finance (.NS tickers). Cached for 5 minutes.
+    """
+    return get_stock_fundamentals(symbol)
+
+
+@mcp.tool()
 def market_brief() -> dict:
     """
     Get a comprehensive scored market brief — all layers in one call.
@@ -617,8 +834,13 @@ def market_brief() -> dict:
 
     Returns:
       nifty:          Nifty 50 spot, today's change %, days to nearest expiry
-      regime:         Current market regime (FEAR / GREED / SIDEWAYS / EXPIRY /
-                      EXODUS / NORMAL) with triggers and suggested focus layer
+      regime:         Current market regime with triggers and suggested focus layer:
+                      EXTREME FEAR (VIX>30) / EXODUS (FII single-day <-5000 Cr or
+                      5-day <-10000 Cr) / CORRECTION (>5% drawdown + VIX rising) /
+                      FEAR (VIX>22 or VIX spiked >10% today or VIX 3-day surge >25%) /
+                      EXPIRY / GREED / SIDEWAYS / NORMAL
+      multiday_context: FII 5-day sum, VIX 3-day change %, drawdown from peak %,
+                      Nifty distance from 200 DMA % (from stored snapshots + technicals)
       signals:        Per-layer scored signals:
                         derivatives: PCR, max pain distance, VIX, OI walls
                         flows:       FII cash, DII cash, FII index futures net
@@ -649,6 +871,215 @@ def market_brief() -> dict:
       3. See SIGNAL WEIGHTING GUIDANCE in the system prompt
     """
     return get_market_brief()
+
+
+@mcp.tool()
+def history(days: int = 30) -> dict:
+    """
+    Summarize market conditions over the most recent N trading days.
+
+    Uses stored daily snapshots (60+ days accumulated since Dec 2025).
+
+    Args:
+      days: Number of recent trading days to summarize. Default: 30.
+
+    Returns:
+      period:       Start/end dates, trading days covered, total snapshots available
+      nifty:        Start/end close, period return %, high/low, avg day range
+      vix:          Current, average, min, max over the period
+      fii_flows:    Cumulative net, avg daily, positive/negative day counts,
+                    current selling/buying streak
+      dii_flows:    Cumulative net, avg daily
+      composite:    Current score, avg/min/max over period
+      regimes:      Count of each regime over the period (normal, fear, exodus, etc.)
+
+    Use when asked:
+      • "How has the market been this month / this week / last N days?"
+      • "Give me a recap of the last 2 weeks"
+      • "What's the market trend over the past month?"
+      • "How many days has it been bearish?"
+    """
+    return get_history_summary(days)
+
+
+@mcp.tool()
+def fii_flow_trend(days: int = 5) -> dict:
+    """
+    FII flow trend over the most recent N trading days.
+
+    Shows daily FII cash + futures breakdown, running cumulative, streak
+    analysis, and whether DII is absorbing FII selling.
+
+    Args:
+      days: Number of recent trading days. Default: 5.
+
+    Returns:
+      daily:     Per-day: FII cash net, DII cash net, FII futures net,
+                 Nifty change %, running FII cumulative
+      summary:   Cumulative FII cash, avg daily, selling/buying streak days,
+                 trend direction (accelerating_selling / decelerating_selling /
+                 accelerating_buying / steady)
+      dii_offset: Cumulative DII cash, whether DII is absorbing FII selling
+      fii_futures: Latest FII futures net position + signal
+
+    Use when asked:
+      • "Are FIIs still selling?"
+      • "How long have FIIs been bearish?"
+      • "Is FII selling getting worse or better?"
+      • "How much have FIIs sold this month?"
+      • "Is DII absorbing the FII selling?"
+    """
+    return get_fii_trend(days)
+
+
+@mcp.tool()
+def similar_historical_setups(
+    vix_above: float | None = None,
+    vix_below: float | None = None,
+    fii_net_below: float | None = None,
+    fii_net_above: float | None = None,
+    regime: str | None = None,
+    composite_below: float | None = None,
+    composite_above: float | None = None,
+) -> dict:
+    """
+    Find past trading days where conditions matched the given filters.
+
+    Searches all stored daily snapshots and returns matching days with
+    their market state + what happened the next trading day.
+
+    Args:
+      vix_above:       Only days where VIX > this value
+      vix_below:        Only days where VIX < this value
+      fii_net_below:    Only days where FII net < this (₹ Cr). e.g. -3000
+      fii_net_above:    Only days where FII net > this (₹ Cr). e.g. 1000
+      regime:           Only days with this regime (fear, exodus, greed, normal, etc.)
+      composite_below:  Only days where composite score < this
+      composite_above:  Only days where composite score > this
+
+    All parameters are optional — combine as needed.
+
+    Returns:
+      filters:              The filter criteria used
+      matches_found:        Number of matching days
+      matches:              Up to 20 most recent matches, each with:
+                             date, nifty_close, nifty_change_pct, vix, fii_net,
+                             regime, composite_score, next_day outcome
+      next_day_outcomes:    Statistical summary across all matches:
+                             avg next-day change %, win rate, max gain/loss
+
+    Use when asked:
+      • "What happened last time VIX spiked above 25?"
+        → similar_historical_setups(vix_above=25)
+      • "History when FIIs sold more than ₹3000 Cr?"
+        → similar_historical_setups(fii_net_below=-3000)
+      • "What happened in past exodus regimes?"
+        → similar_historical_setups(regime="exodus")
+      • "Should I buy the dip?" — combine with drawdown_status()
+        → similar_historical_setups(composite_below=-0.3)
+    """
+    return get_similar_setups(
+        vix_above=vix_above,
+        vix_below=vix_below,
+        fii_net_below=fii_net_below,
+        fii_net_above=fii_net_above,
+        regime=regime,
+        composite_below=composite_below,
+        composite_above=composite_above,
+    )
+
+
+@mcp.tool()
+def drawdown() -> dict:
+    """
+    Current drawdown analysis from recent Nifty highs.
+
+    Looks back across all stored daily snapshots to find the all-time peak,
+    calculates drawdown depth, identifies the trough, and provides institutional
+    flow context during the drawdown period.
+
+    Returns:
+      status:           near_highs / mild_pullback / moderate_correction /
+                        correction / deep_correction / bear_market
+      peak:             Nifty close + date of the all-time high in stored data
+      trough:           Nifty close + date of the lowest point since peak,
+                        max drawdown % from peak
+      current:          Today's Nifty close, drawdown from peak %,
+                        recovery from trough % (if bouncing)
+      duration:         Trading days since peak, days in drawdown
+      during_drawdown:  FII cumulative ₹ Cr, DII cumulative ₹ Cr,
+                        VIX at peak vs current vs max during drawdown
+
+    Use when asked:
+      • "How far are we from all-time highs?"
+      • "How deep is this correction?"
+      • "Should I buy the dip?" (combine with similar_historical_setups)
+      • "Are we in a bear market?"
+      • "How much have FIIs sold during this fall?"
+    """
+    return get_drawdown_status()
+
+
+@mcp.tool()
+def stock_brief(symbol: str) -> dict:
+    """
+    Get a comprehensive scored brief for any NSE-listed stock — all dimensions
+    in one call.
+
+    Fetches technicals, fundamentals, live quote, and recent news in parallel.
+    Scores 7 dimensions to a common -1.0 (bearish) → +1.0 (bullish) scale,
+    detects the stock's overall stance, and computes a weighted composite.
+
+    Args:
+      symbol: NSE trading symbol. e.g. "RELIANCE", "INFY", "HDFCBANK", "TCS"
+
+    Returns:
+      price:          LTP, session change (₹ and %), volume
+      stance:         Stock stance with key + label:
+                      TECHNICALLY STRONG — good technicals + relative strength
+                      FUNDAMENTALLY STRONG — good valuation + growth
+                      MOMENTUM (EXPENSIVE) — strong technicals, stretched valuation
+                      VALUE OPPORTUNITY — attractive fundamentals, weak price action
+                      TECHNICALLY WEAK — poor price action, wait for reversal
+                      OVERVALUED — stretched valuation without growth support
+                      DETERIORATING — weak technicals + poor fundamentals
+                      NEUTRAL — mixed signals
+      signals:        Per-dimension scored signals:
+                        technicals:       from DMA, RSI, Bollinger, MACD, stance
+                        relative_strength: vs Nifty 50 (1w/1m/3m weighted)
+                        valuation:        PEG/PE-based assessment
+                        growth:           revenue + earnings growth
+                        financial_health: debt/equity + current ratio
+                        momentum:         session day change
+                        news:             event-risk density from recent headlines
+                      Each signal has: score (-1→+1), magnitude, direction, note
+      composite:      Weighted composite score, magnitude, direction, weights used
+                      Default: technicals 25%, valuation 20%, growth 15%,
+                      relative_strength 10%, financial_health 10%, momentum 10%, news 10%
+      key_levels:     20/50/200 DMA + support + resistance levels
+      fundamental_snapshot: sector, industry, market cap, P/E, ROE
+      recent_news:    Latest 8 headlines for Claude to interpret sentiment
+      data_issues:    Any dimensions that failed to fetch (null if all OK)
+
+    Use when asked:
+      • "What do you think about RELIANCE?"
+      • "Is INFY a buy at this level?"
+      • "Should I enter HDFCBANK here?"
+      • "Give me the full picture on TCS"
+      • "How does ICICIBANK look?"
+      • Any broad stock-level question needing multi-dimensional analysis
+
+    After receiving results, ADJUST the default weights based on:
+      1. Question type: valuation questions → boost valuation weight;
+         technical questions → boost technicals weight
+      2. Time horizon: short-term → technicals + momentum;
+         long-term → valuation + growth + financial health
+      3. Lead with the stance and composite direction
+      4. Highlight the strongest / weakest signal dimensions
+      5. Use key_levels for actionable entry/exit guidance
+      6. Interpret recent_news headlines for catalysts Claude couldn't auto-score
+    """
+    return get_stock_brief(symbol)
 
 
 if __name__ == "__main__":

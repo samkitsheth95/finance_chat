@@ -5,96 +5,142 @@ alwaysApply: true
 
 # india-markets MCP — Architecture
 
-This is a **Model Context Protocol (MCP) server** for Indian financial market analysis.
-Claude calls tools defined here to fetch live data. There is no web UI or REST API.
+MCP server for Indian financial market analysis. Claude calls tools defined
+here to fetch live data. No web UI or REST API.
 
-## Layer Roadmap
+## Built Layers
 
-| Layer | File | Status |
-|-------|------|--------|
-| 1 — Market Foundation | `tools/kite_tools.py` | ✅ Done |
-| 2 — Institutional Flows | `tools/nse_tools.py` | ✅ Done |
-| 3 — Derivatives / Option Chain | `tools/derivatives_tools.py` | ✅ Done |
-| 4 — Global Macro | `tools/macro_tools.py` | ✅ Done |
-| 5 — News & Sentiment | `tools/news_tools.py` | ✅ Done |
-| 6 — Signal Scoring | `core/signal_scorer.py` + `tools/signal_tools.py` | ✅ Done (Phase 1) |
+| # | Layer | File | What it does |
+|---|-------|------|-------------|
+| 1 | Market Foundation | `tools/kite_tools.py` | Live quotes, OHLC candles, indices (Kite Connect) |
+| 2 | Institutional Flows | `tools/nse_tools.py` | FII/DII cash flows, participant-wise F&O OI (NSE public) |
+| 3 | Derivatives | `tools/derivatives_tools.py` | Option chain, PCR, max pain, OI walls, India VIX |
+| 4 | Global Macro | `tools/macro_tools.py` | Global indices, crude, gold, DXY, USD/INR, US yields (yfinance) |
+| 5 | News & Sentiment | `tools/news_tools.py` | RSS feeds + Google News, event-risk detection |
+| 6 | Signal Scoring | `core/signal_scorer.py` + `tools/signal_tools.py` | Market-level composite: multi-day regime detection (CORRECTION + enhanced EXODUS/FEAR), signal agreement multiplier, conflict flags, weighted score |
+| 7 | Technical Analysis | `tools/technicals_tools.py` | 20/50/200 DMA, RSI, Bollinger, MACD, support/resistance, relative strength vs Nifty |
+| 8 | Stock Fundamentals | `tools/fundamentals_tools.py` + `core/fundamentals_client.py` | Valuation, growth, profitability, financial health via yfinance |
 
-## Key Decisions Made
+**Daily snapshots** — `scripts/save_daily_snapshot.py` runs at 7 PM IST via cron.
+Saves full market state to `data/daily/YYYY-MM-DD.json`. 61+ snapshots accumulated
+(Dec 2025 → present). Backfill script: `scripts/backfill_history.py`.
 
-- **MCP over REST API** — used because the developer uses Cursor daily; no separate UI needed
-- **Zerodha Kite Connect** — chosen as primary data source (paid, most reliable for NSE)
-- **NSE public scraping** — for FII/DII flows (free, no auth needed via `nsepython`)
-- **No portfolio tracking** — pure market analysis tool; user has no holdings in Kite
-- **Selective context injection** — Claude decides which tools to call per question, not pre-fetched
-- **Signal scoring** — raw data → directional scores (+1/0/-1) before Claude synthesizes
+## Key Decisions
+
+- **MCP over REST API** — developer uses Cursor daily; no separate UI needed
+- **Zerodha Kite Connect** — primary data source (paid, most reliable for NSE)
+- **NSE public scraping** — FII/DII flows via `nsepython` (free, no auth)
+- **No portfolio tracking** — pure market analysis tool
+- **Selective context injection** — Claude decides which tools to call per question
+- **Signal scoring** — raw data → directional scores (-1 to +1) before Claude synthesizes
 - **Access token is manual** — Kite token expires daily, user provides it in `.env`
 
 ## Directory Layout
 
 ```
-core/          ← HTTP sessions, auth, instrument caches (one file per data source)
+core/          ← HTTP sessions, auth, instrument caches, signal scoring, daily store
 tools/         ← Business logic and derived signals (no MCP imports)
 server/app.py  ← MCP server: @mcp.tool() wrappers + system prompt instructions
-scripts/       ← One-off utilities (token refresh, etc.)
+scripts/       ← Cron jobs, backfill, one-off utilities
+data/daily/    ← Daily JSON snapshots (gitignored; .gitkeep tracked)
 ```
 
 Run via `.mcp.json`: `python -m server.app` — the `-m` flag adds the project root to
-`sys.path` so all `from core.x import ...` and `from tools.x import ...` imports work.
+`sys.path` so all `from core.x` and `from tools.x` imports work.
 
-## Layer 6 — Phase 2 Improvements
+---
 
-Priority-ordered. Each is independent and can be built in any session.
+## Roadmap — Two Tracks
 
-### P0 — High impact, directly observed in real usage
+Everything below is organized into two independent tracks that can be built in
+parallel. Each item is one session of work unless noted otherwise.
 
-1. **Signal agreement multiplier** — when all 4 layers agree on direction (e.g. all bearish),
-   the composite should amplify rather than average. Today's -0.31 composite for a day with
-   Nifty -1.6%, VIX +11%, FII -₹6,267 Cr, crude +6% felt too mild. Proposed: if ≥3 layers
-   share the same direction, multiply composite by 1.3× (capped at ±1.0).
+### Track A — Forward-Looking Model
 
-2. **VIX rate-of-change trigger** — current FEAR regime needs VIX > 22, but a +11% intraday
-   VIX spike (e.g. 18.9 → 21.1) should count as fear even below the absolute threshold.
-   Add: `vix_change_pct > 10%` as an alternate FEAR trigger.
+Uses accumulated daily snapshots + historical OHLC to answer predictive questions:
+"What's the likely Nifty range this week?", "Is this a good time to buy the dip?",
+"What happened last time conditions looked like this?"
 
-3. **Multi-day FII lookback** — EXODUS currently uses single-day FII cash net. A 5-day
-   rolling total (e.g. ₹-15,000 Cr over 3 days) is a stronger signal than one extreme day.
-   Requires: calling `fii_dii_activity()` isn't enough — need historical FII data storage
-   or a new NSE endpoint. Options: local JSON cache of daily FII/DII, or scrape NSE archives.
+| Step | Layer / Tool | File(s) | What it adds | Prereq |
+|------|-------------|---------|-------------|--------|
+| A1 | Historical query tools | `tools/history_tools.py` | ✅ **DONE** — `history_summary(days)`, `fii_trend(days)`, `similar_setups(conditions)`, `drawdown_status()` — expose stored snapshots to Claude. Not a numbered layer; cross-cutting utility over daily store. | 61+ snapshots (done) |
+| A2 | Index technicals | `tools/technicals_tools.py` | ✅ **DONE** — 20/50/200 DMA, RSI, Bollinger, MACD, support/resistance for Nifty/BankNifty. Scorer functions (`score_trend()`, `score_rsi()`, `score_bollinger()`) pending for A3 integration | Uses live OHLC from Kite |
+| A3 | Multi-day regime detection | `core/signal_scorer.py` | ✅ **DONE** — 5-day rolling FII sum → EXODUS trigger; VIX 3-day rate-of-change → FEAR trigger; Nifty vs 200 DMA (from Kite technicals); new CORRECTION regime (>5% drawdown + VIX rising). `market_brief()` now fetches multi-day context from daily store + Nifty technicals in parallel. | A1 + A2 |
+| A4 | Volatility range forecast | `tools/forecast_tools.py` | `forecast_range(underlying, horizon_days)` — synthesizes VIX-implied range, OI walls, Bollinger bands, historical range stats into expected containment zone | A2 |
+| A5 | Automated insights | `tools/signal_tools.py` | `daily_insights()` — percentile rankings vs history, unusual divergence flags, trend-break detection. Runs alongside `market_brief()` | 120+ snapshots (~Jul 2026) |
 
-### P1 — Meaningful but lower urgency
+**System prompt additions for Track A:**
+- "How has the market been?" → `history_summary(30)`
+- "Are FIIs still selling?" → `fii_trend(5)`
+- "Should I buy the dip?" → `similar_setups()` + `drawdown_status()`
+- "What's the likely range this week?" → `forecast_range()`
+- "What happened last time VIX spiked like this?" → `similar_setups()`
 
-4. **200 DMA regime refinement** — FEAR regime should combine VIX > 22 *and* Nifty below
-   200 DMA for the strongest signal. Requires one `get_historical_ohlc("NIFTY 50", "day", 250)`
-   call to compute the 200-day moving average. Adds ~1s latency to market_brief().
+### Track B — Stock-Specific Signals
 
-5. **Event calendar overrides** — hard overrides for known high-impact days:
-   - RBI MPC announcement day: News 40%, Macro 40%
-   - F&O monthly expiry week: Derivatives 65%
-   - Union Budget day: News 50%, Macro 40%
-   - US FOMC day: Macro 50%, Flows 30%
-   Source: maintain a static calendar in `core/event_calendar.py` or scrape RBI/NSE schedules.
+Builds a per-stock analysis pipeline. Today Claude can fetch a quote and OHLC for
+any stock, but there's no scoring, no synthesis, and no structured analysis framework.
+This track adds layers that answer: "What do you think about RELIANCE?", "Is INFY
+a buy?", "Should I enter TCS here?"
 
-6. **News catalyst detection** — when event_risk_count is extreme (≥8) and headlines share
-   a theme (e.g. all about crude/geopolitical), that layer becomes the *root cause*. Bump
-   news weight automatically when event risk is high + thematically concentrated.
+| Step | Layer / Tool | File(s) | What it adds | Prereq |
+|------|-------------|---------|-------------|--------|
+| B1 | Stock technicals | `tools/technicals_tools.py` | ✅ **DONE** — `technical_analysis(symbol)` — 20/50/200 DMA, RSI, Bollinger, MACD, support/resistance, **relative strength vs Nifty** (1w/1m/3m). Shared file with A2, generalized for any symbol | Uses live OHLC from Kite |
+| B2 | Stock fundamentals | `tools/fundamentals_tools.py` + `core/fundamentals_client.py` | ✅ **DONE** — `stock_fundamentals(symbol)` — market cap, P/E (trailing+forward), P/B, EV/EBITDA, PEG, revenue/profit growth, margins, ROE, debt/equity, dividend yield. Multi-factor valuation assessment. Source: yfinance `.NS` tickers | yfinance (already a dep) |
+| B3 | Stock signal scorer | `tools/stock_tools.py` + `core/stock_scorer.py` | ✅ **DONE** — `stock_brief(symbol)` — the per-stock equivalent of `market_brief()`. Calls technicals + quote + news_search + fundamentals in parallel. Scores 7 dimensions (technicals, relative_strength, valuation, growth, financial_health, momentum, news). Stock stance detection (TECHNICALLY STRONG / VALUE OPPORTUNITY / DETERIORATING / etc.). Weighted composite score. | B1 + B2 |
+| B4 | Delivery & volume analysis | `tools/delivery_tools.py` + `core/nse_client.py` | `delivery_analysis(symbol, days)` — NSE bhavcopy delivery % trend, volume vs 20-day avg, delivery volume breakout detection. High delivery on up-move = genuine buying | NSE bhavcopy scraping |
+| B5 | Sector & peer comparison | `tools/sector_tools.py` | `sector_peers(symbol)` — identify peers, compare relative performance, valuation multiples. Answers "is this stock-specific or sector rotation?" | B2 + static sector map |
 
-### P2 — Nice to have
+**System prompt additions for Track B:**
+- "What do you think about RELIANCE?" → `stock_brief("RELIANCE")`
+- "Is INFY cheap?" → `stock_fundamentals("INFY")` or `stock_brief("INFY")`
+- "Show me HDFC Bank technicals" → `technical_analysis("HDFCBANK")`
+- "Is TCS outperforming the market?" → `technical_analysis("TCS")` (relative strength)
+- "Is this a sector move or stock-specific?" → `sector_peers("RELIANCE")`
+- "Is there real buying in ICICI?" → `delivery_analysis("ICICIBANK", 10)`
 
-7. **BankNifty brief** — `market_brief()` currently only fetches Nifty option chain. Add an
-   optional `underlying` parameter to score BankNifty/FinNifty derivatives signals instead.
+### Shared: A2 + B1 use the same file (✅ DONE)
 
-8. **Historical composite tracking** — log each day's composite score, regime, and layer
-   scores to a local SQLite/JSON file. Over time this enables: "what did the signals say
-   last time FIIs sold this much?" and backtesting of weight profiles.
+`tools/technicals_tools.py` serves both tracks. Built as a general-purpose
+`technical_analysis(symbol, period=200)` that works for indices and stocks alike.
+Relative-strength-vs-Nifty is only computed when symbol is not an index.
 
-9. **Expiry week auto-detection** — instead of just `days_to_expiry ≤ 1`, detect if we're
-   in monthly vs weekly expiry week and adjust derivatives weight accordingly (monthly expiry
-   has stronger max pain gravity than weekly).
+---
+
+## Signal Scoring Improvements (Layer 6 Phase 2)
+
+Targeted fixes to the existing market-level scorer. Each is independent.
+
+| ID | Fix | Impact | Detail |
+|----|-----|--------|--------|
+| S1 | Signal agreement multiplier | High | ✅ **DONE** — When ≥3 layers agree on direction, multiply composite by 1.3× (capped at ±1.0). `compute_composite()` now returns dict with agreement metadata. |
+| S2 | VIX rate-of-change trigger | High | ✅ **DONE** — `vix_change_pct > 10%` as alternate FEAR trigger, even below VIX 22 absolute threshold. Also: VIX 3-day RoC > 25% triggers FEAR (part of A3). |
+| S3 | Event calendar overrides | Medium | Static calendar in `core/event_calendar.py` — RBI MPC, F&O monthly expiry, Budget, FOMC. Hard weight overrides on event days. |
+| S4 | News catalyst concentration | Medium | When event_risk ≥ 8 and headlines share a theme, auto-bump news weight. |
+| S5 | BankNifty brief | Low | Add optional `underlying` param to `market_brief()` for BankNifty/FinNifty. |
+| S6 | Expiry week auto-detection | Low | Monthly vs weekly expiry → adjust derivatives weight (monthly has stronger max pain gravity). |
+
+### Minor cleanup (fix when touching nearby code)
+
+- `score_vix()` maps VIX < 10 → +0.5; consider flattening to +0.25 (complacency)
+- System prompt "Derivatives +20%" is ambiguous — clarify as percentage points
+- `macro_client.py` caches error responses for 60s — consider shorter TTL on errors
+
+---
+
+## Data Accumulation Milestones
+
+| Snapshots | Approx date | What unlocks |
+|-----------|-------------|-------------|
+| 61 | Now | Trend direction, regime transitions, macro correlations |
+| 90 | ~Jun 2026 | Quarterly patterns, budget impact analysis |
+| 120 | ~Jul 2026 | Seasonal effects, statistical pattern matching, automated insights (A5) |
+| 250 | ~Dec 2026 | 200 DMA from stored data, full market cycle coverage |
 
 ## Adding a New Layer
 
-1. Create `tools/<name>_tools.py` with plain functions
-2. If it's a new data source, create `core/<name>_client.py` for session/auth management
-3. Register each function as `@mcp.tool()` in `server/app.py`
-4. Update the system prompt `instructions` in `server/app.py` to mention new capabilities
-5. Update this rule's layer table above
+1. Create `tools/<name>_tools.py` with plain functions (no MCP imports)
+2. If new data source, create `core/<name>_client.py` for session/auth/caching
+3. Register each function as `@mcp.tool()` in `server/app.py` with a rich docstring
+4. Update system prompt `instructions` in `server/app.py` with when-to-call guidance
+5. Update this rule file's layer table and roadmap status

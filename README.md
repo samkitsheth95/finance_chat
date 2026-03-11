@@ -136,6 +136,34 @@ NSE public data (Layers 2, 4, 5) works without Kite — good for testing.
 
 ---
 
+## Daily snapshots
+
+The system logs a daily snapshot of all signal layers to `data/daily/YYYY-MM-DD.json`
+after market close. This builds a historical database that enables multi-day trend
+analysis, pattern matching, and forward-looking signals.
+
+**Run daily at 7 PM IST** (after NSE publishes FII/DII + participant OI):
+```bash
+.venv/bin/python -m scripts.save_daily_snapshot
+```
+
+**Backfill historical data** (Nifty OHLC, VIX, macro, FII futures OI):
+```bash
+.venv/bin/python -m scripts.backfill_history 90          # last 90 days
+.venv/bin/python -m scripts.backfill_history 90 --skip-oi # faster, skip NSE OI
+```
+
+**Cron setup** (7 PM IST = 1:30 PM UTC, weekdays):
+```
+30 13 * * 1-5 cd /path/to/finance_chat && .venv/bin/python -m scripts.save_daily_snapshot
+```
+
+Each snapshot captures 80+ fields: Nifty/BankNifty OHLC, VIX, PCR, max pain, OI walls,
+FII/DII cash flows, FII futures positioning, all macro factors (DXY, crude, US 10Y,
+USD/INR), news event risk, composite score, regime, and inter-signal conflicts.
+
+---
+
 ## Project structure
 
 ```
@@ -154,9 +182,14 @@ finance_chat/
 │   ├── nse_client.py         ← NSE session (cookie-primed requests)
 │   ├── macro_client.py       ← yfinance wrapper with in-process cache
 │   ├── news_client.py        ← RSS + Google News fetcher with cache
-│   └── signal_scorer.py      ← Signal normalization, regime detection, weights
+│   ├── signal_scorer.py      ← Signal normalization, regime detection, weights
+│   └── daily_store.py        ← Daily snapshot save/load/query helpers
 ├── scripts/
-│   └── refresh_token.py      ← Token refresh utility
+│   ├── refresh_token.py      ← Token refresh utility
+│   ├── save_daily_snapshot.py ← Daily cron: capture all layers to JSON
+│   └── backfill_history.py   ← One-time: backfill historical snapshots
+├── data/
+│   └── daily/                ← Daily JSON snapshots (gitignored)
 ├── .mcp.json                 ← Cursor / Claude Code MCP config
 ├── .env.example              ← API key template
 ├── .env                      ← Your keys (gitignored)

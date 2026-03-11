@@ -30,11 +30,13 @@ from core.signal_scorer import (
     magnitude_label,
     direction_label,
 )
+from core.daily_store import load_recent
 from tools.kite_tools import get_indices
 from tools.derivatives_tools import get_option_chain, get_vix
 from tools.nse_tools import get_fii_dii_activity, get_participant_oi
 from tools.macro_tools import get_macro_snapshot
 from tools.news_tools import get_market_news
+from tools.technicals_tools import technical_analysis as _run_technicals
 
 
 # Key macro factors most relevant to India FII flow direction.
@@ -73,6 +75,43 @@ def _layer_avg(signals: dict) -> float | None:
     return round(sum(scores) / len(scores), 2) if scores else None
 
 
+# ── Multi-day context (A3) ────────────────────────────────────────────
+
+def _compute_multiday_context() -> dict:
+    """
+    Derive multi-day regime inputs from stored daily snapshots.
+
+    Returns dict with optional keys: fii_5d_sum_cr, vix_3d_change_pct,
+    drawdown_pct. Fast — reads only local JSON files.
+    """
+    snaps = load_recent(250)
+    if not snaps:
+        return {}
+
+    ctx: dict = {}
+
+    recent = snaps[-5:] if len(snaps) >= 5 else snaps
+    fii_nets = [s.get("fii_net_cr") for s in recent if s.get("fii_net_cr") is not None]
+    if fii_nets:
+        ctx["fii_5d_sum_cr"] = round(sum(fii_nets), 2)
+
+    vix_values = [s.get("vix_close") for s in snaps if s.get("vix_close") is not None]
+    if len(vix_values) >= 4:
+        vix_3d_ago = vix_values[-4]
+        vix_now = vix_values[-1]
+        if vix_3d_ago and vix_3d_ago > 0:
+            ctx["vix_3d_change_pct"] = round((vix_now - vix_3d_ago) / vix_3d_ago * 100, 2)
+
+    nifty_closes = [s.get("nifty_close") for s in snaps if s.get("nifty_close") is not None]
+    if nifty_closes:
+        peak = max(nifty_closes)
+        current = nifty_closes[-1]
+        if peak > 0:
+            ctx["drawdown_pct"] = round((current - peak) / peak * 100, 2)
+
+    return ctx
+
+
 # ── Main tool ────────────────────────────────────────────────────────
 
 def get_market_brief() -> dict:
@@ -87,18 +126,22 @@ def get_market_brief() -> dict:
     Claude should adjust the default weights based on the user's question
     type (options/flows/macro/general) and time horizon (intraday → yearly).
     """
+    # ── 0. Multi-day context from daily snapshots (local reads) ──
+    multiday = _compute_multiday_context()
+
     # ── 1. Parallel data fetch ────────────────────────────────────
     tasks = {
-        "vix":      (get_vix,),
-        "oc":       (get_option_chain, "NIFTY", "near"),
-        "fii_dii":  (get_fii_dii_activity,),
-        "oi":       (get_participant_oi, "latest"),
-        "macro":    (get_macro_snapshot,),
-        "news":     (get_market_news,),
-        "indices":  (get_indices,),
+        "vix":        (get_vix,),
+        "oc":         (get_option_chain, "NIFTY", "near"),
+        "fii_dii":    (get_fii_dii_activity,),
+        "oi":         (get_participant_oi, "latest"),
+        "macro":      (get_macro_snapshot,),
+        "news":       (get_market_news,),
+        "indices":    (get_indices,),
+        "technicals": (_run_technicals, "NIFTY 50", 200),
     }
     raw: dict = {}
-    with ThreadPoolExecutor(max_workers=7) as pool:
+    with ThreadPoolExecutor(max_workers=8) as pool:
         futures = {}
         for key, call in tasks.items():
             fn, *args = call
@@ -222,16 +265,32 @@ def get_market_brief() -> dict:
     pcr_val = (oc.get("pcr", {}).get("value")) if _ok(oc) else None
     fii_cash_net = fii_dii.get("fii", {}).get("net_cr") if _ok(fii_dii) else None
 
-    # ── 7. Regime detection ───────────────────────────────────────
+    # A3: extract 200 DMA distance from technicals
+    nifty_vs_200dma_pct = None
+    tech_data = raw.get("technicals", {})
+    if _ok(tech_data):
+        nifty_vs_200dma_pct = tech_data.get("dma", {}).get("distance_200dma_pct")
+
+    # S2: single-day VIX rate of change
+    vix_day_change_pct = None
+    if _ok(vix_data):
+        vix_day_change_pct = vix_data.get("change_pct")
+
+    # ── 7. Regime detection (A3 + S2 enhanced) ────────────────────
     regime = detect_regime(
         vix=vix_val,
         pcr=pcr_val,
         fii_cash_net_cr=fii_cash_net,
         nifty_day_range_pct=nifty_range_pct,
         days_to_expiry=days_to_expiry,
+        fii_5d_sum_cr=multiday.get("fii_5d_sum_cr"),
+        vix_3d_change_pct=multiday.get("vix_3d_change_pct"),
+        drawdown_pct=multiday.get("drawdown_pct"),
+        nifty_vs_200dma_pct=nifty_vs_200dma_pct,
+        vix_change_pct=vix_day_change_pct,
     )
 
-    # ── 8. Composite score ────────────────────────────────────────
+    # ── 8. Composite score (S1: agreement multiplier) ────────────
     weights = get_default_weights(regime["key"])
     layer_scores = {
         "derivatives": deriv.get("layer_score"),
@@ -239,7 +298,8 @@ def get_market_brief() -> dict:
         "macro":       macro.get("layer_score"),
         "news":        news.get("layer_score"),
     }
-    composite = compute_composite(layer_scores, weights)
+    composite_result = compute_composite(layer_scores, weights)
+    composite = composite_result["score"]
 
     # ── 9. Conflicts ──────────────────────────────────────────────
     conflicts = find_conflicts({
@@ -255,6 +315,30 @@ def get_market_brief() -> dict:
     ]
 
     # ── 11. Assemble brief ────────────────────────────────────────
+    composite_block: dict = {
+        "score": composite,
+        "magnitude": magnitude_label(composite),
+        "direction": direction_label(composite),
+        "weights_used": weights,
+        "layer_scores": {k: v for k, v in layer_scores.items() if v is not None},
+    }
+    if composite_result.get("agreement_boost"):
+        composite_block["agreement_boost"] = True
+        composite_block["agreement_detail"] = (
+            f"{composite_result['layers_bullish']}B/{composite_result['layers_bearish']}Be "
+            f"of {composite_result['layers_available']} layers — 1.3× amplified"
+        )
+
+    multiday_block: dict = {}
+    if multiday.get("fii_5d_sum_cr") is not None:
+        multiday_block["fii_5d_sum_cr"] = multiday["fii_5d_sum_cr"]
+    if multiday.get("vix_3d_change_pct") is not None:
+        multiday_block["vix_3d_change_pct"] = multiday["vix_3d_change_pct"]
+    if multiday.get("drawdown_pct") is not None:
+        multiday_block["drawdown_pct"] = multiday["drawdown_pct"]
+    if nifty_vs_200dma_pct is not None:
+        multiday_block["nifty_vs_200dma_pct"] = nifty_vs_200dma_pct
+
     return {
         "nifty": {
             "spot": nifty_spot,
@@ -262,6 +346,7 @@ def get_market_brief() -> dict:
             "days_to_expiry": days_to_expiry,
         },
         "regime": regime,
+        "multiday_context": multiday_block or None,
         "signals": {
             "derivatives": deriv,
             "flows": flows,
@@ -269,13 +354,7 @@ def get_market_brief() -> dict:
             "news": news,
         },
         "conflicts": conflicts,
-        "composite": {
-            "score": composite,
-            "magnitude": magnitude_label(composite),
-            "direction": direction_label(composite),
-            "weights_used": weights,
-            "layer_scores": {k: v for k, v in layer_scores.items() if v is not None},
-        },
+        "composite": composite_block,
         "data_issues": errors or None,
         "as_of": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
