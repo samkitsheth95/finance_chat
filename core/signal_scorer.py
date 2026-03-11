@@ -258,8 +258,27 @@ def detect_regime(
 
 
 # ── Default weight profiles ──────────────────────────────────────────
+#
+# Each regime shifts which signal layer matters most:
+#
+#   normal       — Regular trading day, no extreme conditions. All layers balanced.
+#   fear         — VIX > 22. Elevated anxiety. FII flow direction decides market fate.
+#   extreme_fear — VIX > 30. Panic / crash. FII flows dominate; technicals unreliable.
+#   exodus       — FII cash net < -₹5,000 Cr (single day). Macro drives the outflows
+#                  (DXY, crude, US yields). Ask "why are FIIs leaving?", not "what do charts say?"
+#   greed        — VIX < 13 AND PCR < 0.6. Low fear + call complacency. Option writers
+#                  control reversal points; derivatives signals predict the top.
+#   sideways     — VIX 14–20, Nifty day range < 0.8%. Range-bound. Max pain + OI walls
+#                  define the band; Greeks-driven market.
+#   expiry       — ≤1 day to option expiry. Theta decay at max, max pain gravity strongest.
+#
+# Priority (checked top-to-bottom in detect_regime):
+#   extreme_fear > exodus > fear > expiry > greed > sideways > normal
+#
+# To nudge weights: edit the dict below. Rows must sum to 1.0.
 
 _DEFAULT_WEIGHTS: dict[str, dict[str, float]] = {
+    #                    derivs  flows   macro   news
     "normal":       {"derivatives": 0.30, "flows": 0.30, "macro": 0.25, "news": 0.15},
     "fear":         {"derivatives": 0.15, "flows": 0.50, "macro": 0.25, "news": 0.10},
     "extreme_fear": {"derivatives": 0.10, "flows": 0.55, "macro": 0.20, "news": 0.15},

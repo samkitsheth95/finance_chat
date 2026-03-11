@@ -1,31 +1,55 @@
 # india-markets MCP
 
 An MCP (Model Context Protocol) server that gives Claude live access to Indian
-financial market data via Zerodha Kite Connect. Ask questions about NSE/BSE
-stocks, indices, and historical price data directly inside Cursor or Claude Code.
+financial market data. Ask questions about NSE/BSE stocks, indices, options,
+institutional flows, global macro, and news — directly inside Cursor or Claude Code.
 
-## What you can ask (Layer 1)
+## What you can ask
 
 ```
 "How is the market doing today?"
-"What is the current price of Reliance?"
-"How has Infosys performed over the last 3 months?"
-"What is India VIX right now?"
-"Show me BankNifty's intraday movement today."
-"What is the 52-week high and low range for HDFC Bank?"
-"Compare Nifty IT vs Nifty Bank performance this month."
+"Should I be buying Nifty calls today or is it too risky?"
+"What's the overall market setup? Give me the full picture."
+"Are FIIs buying or selling? What's their derivatives positioning?"
+"Show me the BankNifty option chain for this week's expiry."
+"What is PCR and max pain for Nifty?"
+"Is the macro setup supportive for India this month?"
+"How do crude prices and DXY affect Indian markets right now?"
+"Any event risk or market-moving news today?"
+"Is it safe to go long today or should I wait?"
 ```
 
-## Roadmap
+## Data Layers
 
-| Layer | Data | Status |
-|-------|------|--------|
-| 1 | Live quotes, indices, historical OHLC (Kite) | ✅ Done |
-| 2 | FII/DII institutional flows (NSE public) | Planned |
-| 3 | Option chain, Greeks, PCR, Max Pain (Kite) | Planned |
-| 4 | Global macro — crude, DXY, US markets, GIFT Nifty | Planned |
-| 5 | News and geopolitical sentiment | Planned |
-| 6 | Signal scoring and weighting framework | Planned |
+| Layer | Data | Source | Status |
+|-------|------|--------|--------|
+| 1 — Market Foundation | Live quotes, indices, historical OHLC | Kite Connect | ✅ Done |
+| 2 — Institutional Flows | FII/DII cash flows, F&O participant OI | NSE public | ✅ Done |
+| 3 — Derivatives | Option chain, Greeks, PCR, Max Pain, VIX | Kite Connect | ✅ Done |
+| 4 — Global Macro | S&P 500, DXY, crude, US 10Y, USD/INR | yfinance | ✅ Done |
+| 5 — News & Sentiment | RSS feeds, Google News, event risk | feedparser + gnews | ✅ Done |
+| 6 — Signal Scoring | Scored brief, regime detection, conflicts | All layers | ✅ Done (Phase 1) |
+
+## Market Regimes
+
+`market_brief()` automatically detects the current market regime from live data
+and adjusts which signal layer matters most. Claude uses this to decide how much
+weight to give derivatives vs flows vs macro vs news for any given question.
+
+| Regime | Trigger | What's happening | Dominant layer |
+|--------|---------|------------------|----------------|
+| EXTREME FEAR | VIX > 30 | Panic / crash-like conditions | Flows (55%) — are FIIs done selling? |
+| FEAR | VIX > 22 | Elevated anxiety, selloff underway | Flows (50%) — institutional direction decides |
+| FII EXODUS | FII cash < -₹5,000 Cr/day | FIIs dumping aggressively | Macro (55%) — what's driving them out? |
+| EXPIRY | ≤1 day to option expiry | Expiry day | Derivatives (60%) — theta + max pain gravity |
+| GREED | VIX < 13 AND PCR < 0.6 | Low fear + call complacency | Derivatives (55%) — option writers control reversal |
+| SIDEWAYS | VIX 14–20, range < 0.8% | Tight range, no direction | Derivatives (55%) — OI walls define the band |
+| NORMAL | None of the above | Regular trading day | Balanced (30/30/25/15) |
+
+Regimes are checked in priority order (top to bottom). If VIX is 35 *and* FII sold
+₹8,000 Cr, the regime is EXTREME FEAR (not EXODUS) because VIX > 30 is checked first.
+
+Default weights can be adjusted in `core/signal_scorer.py` → `_DEFAULT_WEIGHTS`.
 
 ---
 
@@ -36,6 +60,8 @@ stocks, indices, and historical price data directly inside Cursor or Claude Code
 ```bash
 git clone https://github.com/your-username/finance_chat.git
 cd finance_chat
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
@@ -89,12 +115,12 @@ Alternatively: Cmd+Shift+P → type "MCP" → "Cursor: Open MCP Settings"
 
 ```bash
 # From the project directory:
-claude mcp add --scope project india-markets python mcp_server.py
+claude mcp add --scope project india-markets python -m server.app
 ```
 
 Or add globally so it's available in all projects:
 ```bash
-claude mcp add india-markets python /full/path/to/finance_chat/mcp_server.py
+claude mcp add india-markets python -m server.app
 ```
 
 ---
@@ -103,10 +129,10 @@ claude mcp add india-markets python /full/path/to/finance_chat/mcp_server.py
 
 Each person needs:
 1. A Zerodha account with [Kite Connect API](https://kite.trade/pricing) access
-2. Their own `KITE_API_KEY`, `KITE_ACCESS_TOKEN`, in a `.env` file
+2. Their own `KITE_API_KEY` and `KITE_ACCESS_TOKEN` in a `.env` file
 3. Python 3.10+ and `pip install -r requirements.txt`
 
-Everything else (code, `.mcp.json`, tools) is in the repo.
+NSE public data (Layers 2, 4, 5) works without Kite — good for testing.
 
 ---
 
@@ -114,13 +140,25 @@ Everything else (code, `.mcp.json`, tools) is in the repo.
 
 ```
 finance_chat/
-├── mcp_server.py          ← MCP server entry point
+├── server/
+│   └── app.py                ← MCP server: tool registration + system prompt
 ├── tools/
-│   └── kite_tools.py      ← Layer 1: quote, indices, historical OHLC
+│   ├── kite_tools.py         ← Layer 1: quotes, indices, historical OHLC
+│   ├── nse_tools.py          ← Layer 2: FII/DII flows, participant OI
+│   ├── derivatives_tools.py  ← Layer 3: option chain, PCR, max pain, VIX
+│   ├── macro_tools.py        ← Layer 4: global indices, crude, DXY, yields
+│   ├── news_tools.py         ← Layer 5: RSS, Google News, event risk
+│   └── signal_tools.py       ← Layer 6: market_brief() aggregator
 ├── core/
-│   └── kite_client.py     ← Kite Connect session + instrument cache
-├── .mcp.json              ← Cursor / Claude Code MCP config
-├── .env.example           ← API key template
-├── .env                   ← Your keys (gitignored)
+│   ├── kite_client.py        ← Kite Connect session + instrument cache
+│   ├── nse_client.py         ← NSE session (cookie-primed requests)
+│   ├── macro_client.py       ← yfinance wrapper with in-process cache
+│   ├── news_client.py        ← RSS + Google News fetcher with cache
+│   └── signal_scorer.py      ← Signal normalization, regime detection, weights
+├── scripts/
+│   └── refresh_token.py      ← Token refresh utility
+├── .mcp.json                 ← Cursor / Claude Code MCP config
+├── .env.example              ← API key template
+├── .env                      ← Your keys (gitignored)
 └── requirements.txt
 ```
