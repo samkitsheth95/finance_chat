@@ -113,7 +113,7 @@ HOW TO USE THE TOOLS:
       recent highs/lows, or "how has X performed over the last N days/weeks"
     → Default interval: "day" | Default days: 30
 
-  technical_analysis(symbol, period)
+  technicals(symbol, period)
     → Use when asked about stock or index technicals, support/resistance, trend,
       moving averages, RSI, Bollinger Bands, MACD, or relative strength
     → symbol: any NSE/BSE stock or index, e.g. "RELIANCE", "NIFTY 50", "HDFCBANK"
@@ -121,20 +121,20 @@ HOW TO USE THE TOOLS:
     → Returns: DMAs with trend alignment, RSI with signal, Bollinger with %B,
       MACD with crossover, support/resistance levels, overall stance
     → For stocks: includes relative strength vs Nifty over 1w/1m/3m
-    → "Show me HDFC Bank technicals" → technical_analysis("HDFCBANK")
-    → "Is RELIANCE in an uptrend?" → technical_analysis("RELIANCE")
-    → "What are Nifty support levels?" → technical_analysis("NIFTY 50")
+    → "Show me HDFC Bank technicals" → technicals("HDFCBANK")
+    → "Is RELIANCE in an uptrend?" → technicals("RELIANCE")
+    → "What are Nifty support levels?" → technicals("NIFTY 50")
     → "Is TCS outperforming the market?" → check relative_strength_vs_nifty
 
-  stock_fundamentals(symbol)
+  fundamentals(symbol)
     → Use when asked about a stock's valuation, financials, growth, P/E, P/B,
       whether a stock is cheap/expensive, or for fundamental analysis
     → symbol: NSE trading symbol, e.g. "RELIANCE", "INFY", "HDFCBANK"
     → Returns: valuation ratios with assessment, growth metrics, profitability,
       financial health with assessment, market data (52w range, beta, yield)
-    → "Is INFY cheap?" → stock_fundamentals("INFY")
-    → "What's Reliance's P/E?" → stock_fundamentals("RELIANCE")
-    → "How leveraged is Tata Motors?" → stock_fundamentals("TATAMOTORS")
+    → "Is INFY cheap?" → fundamentals("INFY")
+    → "What's Reliance's P/E?" → fundamentals("RELIANCE")
+    → "How leveraged is Tata Motors?" → fundamentals("TATAMOTORS")
     → For full stock picture, use stock_brief() instead (scores everything)
 
   stock_brief(symbol)
@@ -245,37 +245,37 @@ HOW TO USE THE TOOLS:
     → For SPECIFIC questions (e.g. "show me BankNifty option chain"), use the
       individual tools instead — market_brief() always fetches Nifty data
 
-  history_summary(days)
+  history(days)
     → Use when asked "how has the market been?", "what happened last month?",
       "give me a recap of the last N days", or any multi-day lookback question
     → days: number of recent trading days to summarize (default 30)
     → Returns: Nifty start/end/return%, VIX avg/min/max, FII/DII cumulative flows,
       regime distribution, composite score trend
-    → "How has the market been this week?" → history_summary(5)
-    → "Give me a 3-month recap" → history_summary(60)
+    → "How has the market been this week?" → history(5)
+    → "Give me a 3-month recap" → history(60)
 
-  fii_trend(days)
+  fii_flow_trend(days)
     → Use when asked "are FIIs still selling?", "how long have FIIs been bearish?",
       "is FII selling getting worse or better?", or any FII flow persistence question
     → days: number of recent trading days (default 5)
     → Returns: daily FII cash + futures breakdown, running cumulative, selling/buying
       streak, trend direction (accelerating/decelerating), DII offset analysis
-    → "Are FIIs still selling?" → fii_trend(5)
-    → "How much have FIIs sold this month?" → fii_trend(20)
+    → "Are FIIs still selling?" → fii_flow_trend(5)
+    → "How much have FIIs sold this month?" → fii_flow_trend(20)
 
-  similar_setups(vix_above, vix_below, fii_net_below, fii_net_above, regime,
-                 composite_below, composite_above)
+  similar_historical_setups(vix_above, vix_below, fii_net_below, fii_net_above,
+                           regime, composite_below, composite_above)
     → Use when asked "what happened last time VIX was this high?", "what happened
       last time FIIs sold this much?", "should I buy the dip?", or any question
       seeking historical precedent for current conditions
     → All parameters optional — combine as needed to describe conditions
     → Returns: matching past days with full snapshot data, plus next-day outcome
       analysis (avg change, win rate, max gain/loss)
-    → "What happened when VIX was above 20?" → similar_setups(vix_above=20)
-    → "Last time FIIs sold >3000 Cr?" → similar_setups(fii_net_below=-3000)
-    → "History of exodus regime?" → similar_setups(regime="exodus")
+    → "What happened when VIX was above 20?" → similar_historical_setups(vix_above=20)
+    → "Last time FIIs sold >3000 Cr?" → similar_historical_setups(fii_net_below=-3000)
+    → "History of exodus regime?" → similar_historical_setups(regime="exodus")
 
-  drawdown_status()
+  drawdown()
     → Use when asked "how far are we from highs?", "should I buy the dip?",
       "how deep is this correction?", "are we in a bear market?",
       or any question about current market decline depth
@@ -975,7 +975,7 @@ def similar_historical_setups(
         → similar_historical_setups(fii_net_below=-3000)
       • "What happened in past exodus regimes?"
         → similar_historical_setups(regime="exodus")
-      • "Should I buy the dip?" — combine with drawdown_status()
+      • "Should I buy the dip?" — combine with drawdown()
         → similar_historical_setups(composite_below=-0.3)
     """
     return get_similar_setups(
