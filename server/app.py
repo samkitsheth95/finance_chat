@@ -441,10 +441,16 @@ def historical_ohlc(
 @mcp.tool()
 def fii_dii_activity() -> dict:
     """
-    Get today's FII/FPI and DII cash market activity from NSE.
+    Get the latest available FII/FPI and DII cash market activity from NSE.
 
     Returns buy value, sell value, and net (all in ₹ crores) for both
     FII/FPI and DII, plus a directional signal.
+
+    IMPORTANT — Data freshness:
+      NSE publishes final FII/DII numbers between 8:30–9:30 PM IST.
+      Before that, this returns the PREVIOUS trading day's data.
+      Always check the 'date' field to see which day the data is for.
+      If 'is_stale' is true, tell the user the data is from a prior day.
 
     Use when asked about:
       • Institutional buying/selling today
@@ -458,8 +464,6 @@ def fii_dii_activity() -> dict:
       neutral           → FII net between -₹500 cr and +₹500 cr
       bearish           → FII net < -₹500 cr
       strongly_bearish  → FII net < -₹500 cr AND DII also net sellers
-
-    Note: Intraday values are provisional; final figures available after 3:45 PM IST.
     """
     return get_fii_dii_activity()
 

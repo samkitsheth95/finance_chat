@@ -2,16 +2,16 @@
 """
 Daily Snapshot Saver
 
-Run at ~7 PM IST each trading day (after NSE publishes FII/DII + participant OI).
+Run at ~9:30 PM IST each trading day (after NSE publishes FII/DII at 8:30–9:30 PM).
 Fetches all layers in parallel, extracts key scalar metrics, and writes a flat
 JSON snapshot to data/daily/YYYY-MM-DD.json.
 
 Usage:
     python -m scripts.save_daily_snapshot           # today
-    python -m scripts.save_daily_snapshot 2026-03-11 # specific date
+    python -m scripts.save_daily_snapshot 2026-03-11 # specific date (warns about stale data)
 
-Cron example (7 PM IST = 1:30 PM UTC, Mon–Fri):
-    30 13 * * 1-5 cd /path/to/finance_chat && .venv/bin/python -m scripts.save_daily_snapshot
+Cron example (9:30 PM IST = 4:00 PM UTC, Mon–Fri):
+    0 16 * * 1-5 cd /path/to/finance_chat && .venv/bin/python -m scripts.save_daily_snapshot
 """
 
 from __future__ import annotations
@@ -45,6 +45,7 @@ def _fetch_all() -> dict:
     from tools.nse_tools import get_fii_dii_activity, get_participant_oi
     from tools.macro_tools import get_macro_snapshot
     from tools.news_tools import get_market_news
+    from tools.technicals_tools import technical_analysis
 
     tasks = {
         "indices":   (get_indices,),
@@ -55,6 +56,7 @@ def _fetch_all() -> dict:
         "oi":        (get_participant_oi, "latest"),
         "macro":     (get_macro_snapshot,),
         "news":      (get_market_news,),
+        "technicals": (technical_analysis, "NIFTY 50", 200),
     }
 
     raw: dict = {}
@@ -123,6 +125,7 @@ def _extract_snapshot(raw: dict) -> dict:
     fd = raw.get("fii_dii") or {}
     fii = fd.get("fii", {})
     dii = fd.get("dii", {})
+    snap["fii_dii_data_date"] = fd.get("date")
     snap["fii_buy_cr"] = fii.get("buy_cr")
     snap["fii_sell_cr"] = fii.get("sell_cr")
     snap["fii_net_cr"] = fii.get("net_cr")
@@ -198,6 +201,28 @@ def _extract_snapshot(raw: dict) -> dict:
         h.get("title", h) if isinstance(h, dict) else str(h)
         for h in er[:5]
     ]
+
+    # --- Nifty Technicals ---
+    tech = raw.get("technicals") or {}
+    dma = tech.get("dma", {})
+    snap["nifty_rsi"] = (tech.get("rsi") or {}).get("value")
+    snap["nifty_rsi_signal"] = (tech.get("rsi") or {}).get("signal")
+    snap["nifty_dma_20"] = dma.get("dma_20")
+    snap["nifty_dma_50"] = dma.get("dma_50")
+    snap["nifty_dma_200"] = dma.get("dma_200")
+    snap["nifty_vs_200dma_pct"] = dma.get("distance_200dma_pct")
+    snap["nifty_vs_50dma_pct"] = dma.get("distance_50dma_pct")
+    snap["nifty_dma_trend"] = dma.get("trend")
+    snap["nifty_dma_cross"] = dma.get("cross")
+    boll = tech.get("bollinger") or {}
+    snap["nifty_bollinger_bandwidth"] = boll.get("bandwidth_pct")
+    snap["nifty_bollinger_pct_b"] = boll.get("percent_b")
+    snap["nifty_bollinger_signal"] = boll.get("signal")
+    macd = tech.get("macd") or {}
+    snap["nifty_macd_histogram"] = macd.get("histogram")
+    snap["nifty_macd_crossover"] = macd.get("crossover")
+    snap["nifty_macd_trend"] = macd.get("trend")
+    snap["nifty_technical_stance"] = (tech.get("technical_stance") or {}).get("signal")
 
     # --- Computed scores (run signal scorer on extracted values) ---
     snap.update(_compute_scores(snap))
@@ -310,6 +335,7 @@ def _compute_scores(snap: dict) -> dict:
         fii_5d_sum_cr=fii_5d_sum_cr,
         vix_3d_change_pct=vix_3d_change_pct,
         drawdown_pct=drawdown_pct,
+        nifty_vs_200dma_pct=snap.get("nifty_vs_200dma_pct"),
         vix_change_pct=snap.get("vix_change_pct"),
     )
     scores["regime"] = regime["key"]
@@ -367,6 +393,18 @@ def main() -> None:
             print(f"Invalid date: {sys.argv[1]}. Use YYYY-MM-DD format.")
             sys.exit(1)
 
+    if target_date != date.today():
+        print(
+            f"WARNING: Fetching LIVE data but saving as {target_date.isoformat()}.\n"
+            f"  FII/DII, macro, news, and option chain are always today's data.\n"
+            f"  Only Kite OHLC reflects the actual date. For historical backfill,\n"
+            f"  use: python -m scripts.backfill_history\n"
+        )
+        answer = input("  Continue anyway? [y/N] ").strip().lower()
+        if answer != "y":
+            print("[snapshot] Aborted.")
+            sys.exit(0)
+
     print(f"[snapshot] Fetching all layers for {target_date.isoformat()}...")
     raw = _fetch_all()
 
@@ -378,6 +416,23 @@ def main() -> None:
         sys.exit(1)
 
     snapshot = _extract_snapshot(raw)
+
+    # Warn if NSE FII/DII date doesn't match the snapshot date
+    fii_data_date = snapshot.get("fii_dii_data_date")
+    if fii_data_date:
+        try:
+            from datetime import datetime as _dt
+            parsed = _dt.strptime(fii_data_date, "%d-%b-%Y").date()
+            if parsed != target_date:
+                print(
+                    f"  WARN  FII/DII data is for {fii_data_date}, not {target_date.isoformat()}.\n"
+                    f"         NSE hasn't published today's numbers yet.\n"
+                    f"         FII/DII fields will be STALE. Re-run after ~7 PM IST."
+                )
+                snapshot["_fii_dii_stale"] = True
+        except ValueError:
+            pass
+
     path = save(snapshot, target_date)
     print(f"[snapshot] Saved → {path}")
 
@@ -393,6 +448,16 @@ def main() -> None:
     print(f"  VIX:   {vix}" if vix else "")
     print(f"  FII:   ₹{fii:+,.0f} Cr" if fii else "")
     print(f"  Score: {comp}  |  Regime: {regime}" if comp is not None else "")
+    tech_stance = snapshot.get("nifty_technical_stance")
+    rsi = snapshot.get("nifty_rsi")
+    dma200 = snapshot.get("nifty_vs_200dma_pct")
+    if tech_stance:
+        parts = [f"Technicals: {tech_stance}"]
+        if rsi is not None:
+            parts.append(f"RSI {rsi}")
+        if dma200 is not None:
+            parts.append(f"200DMA {dma200:+.1f}%")
+        print(f"  {' | '.join(parts)}")
 
     conflicts = snapshot.get("conflicts", [])
     if conflicts:

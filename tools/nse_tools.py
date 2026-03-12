@@ -44,20 +44,22 @@ def _prev_trading_day(days_back: int = 1) -> str:
 
 def get_fii_dii_activity() -> dict:
     """
-    Get today's FII and DII cash market buy/sell/net activity from NSE.
+    Get the latest available FII and DII cash market buy/sell/net activity from NSE.
 
-    Returns buy value, sell value, and net for both FII/FPI and DII for
-    the current trading day. Values are in ₹ crores.
+    Returns buy value, sell value, and net for both FII/FPI and DII.
+    Values are in ₹ crores.
+
+    IMPORTANT — Data freshness:
+      NSE publishes final FII/DII numbers between 8:30–9:30 PM IST.
+      Before that, this endpoint returns the PREVIOUS trading day's data.
+      The response includes a 'data_date' field showing which day the
+      numbers actually belong to, and 'is_stale' if it's not today.
 
     Interpretation guide:
       FII net > 0  → foreign institutions net buyers (bullish signal)
       FII net < 0  → foreign institutions net sellers (bearish signal)
       DII net > 0  → domestic institutions absorbing FII selling (support)
       DII net < 0  → both selling together (strong bearish pressure)
-
-    Note: Data is sourced from NSE's fiidiiTradeReact endpoint. Today's
-    final numbers are confirmed after market close (~3:45 PM IST).
-    Intraday figures are provisional.
     """
     try:
         raw = nse_fetch("https://www.nseindia.com/api/fiidiiTradeReact")
@@ -100,6 +102,22 @@ def get_fii_dii_activity() -> dict:
         elif "DII" in category:
             result["dii"]  = entry
             result["date"] = result["date"] or date_val
+
+    # Staleness detection: NSE publishes at 8:30–9:30 PM IST.
+    # Before that, the API returns the previous day's data.
+    nse_date_str = result.get("date")
+    if nse_date_str:
+        try:
+            nse_date = datetime.strptime(nse_date_str, "%d-%b-%Y").date()
+            today = datetime.now().date()
+            if nse_date < today:
+                result["is_stale"] = True
+                result["stale_note"] = (
+                    f"Data is for {nse_date_str}, not today. "
+                    f"NSE publishes today's numbers after 8:30 PM IST."
+                )
+        except ValueError:
+            pass
 
     # Derived combined net and directional signal
     fii_net = result["fii"].get("net_cr", 0.0)
