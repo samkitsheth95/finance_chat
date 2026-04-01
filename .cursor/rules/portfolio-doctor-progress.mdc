@@ -8,7 +8,7 @@ alwaysApply: true
 **Spec:** `docs/superpowers/specs/2026-04-01-portfolio-doctor-design.md`
 **Plan:** `docs/superpowers/plans/2026-04-01-portfolio-doctor.md`
 
-## Status: Tasks 1–12 complete, Task 13 next
+## Status: Tasks 1–13 complete, Task 14 next
 
 ---
 
@@ -128,13 +128,23 @@ alwaysApply: true
 
 ---
 
-## Remaining (in dependency order)
+### Task 13: MCP Tools — report_tools.py (action plan + full report) ✅
+- `portfolio_doctor/tools/report_tools.py` — action plan builder + full report aggregation
+- `build_action_plan(behavioral, alternatives)` — pure logic: START (outperforming alternatives), STOP (costly behaviors sorted by cost), KEEP (positive behaviors)
+- `get_action_plan(client_name)` — loads cached behavioral + alternatives, calls `build_action_plan`, saves to `action_plan.json`
+- `get_full_report_data(client_name)` — aggregates all analysis into canvas JSON schema (spec §5 A–F)
+- Sections: snapshot (A), equity_curve with behavioral markers (B), behavioral radar + top issues (C), alternative scenarios (D), allocation (E), action_plan (F)
+- Score transform: `_score_to_0_10()` — `(score + 1.0) * 5.0` for display
+- Radar mapping: 9 detectors → 6 dimensions (timing_discipline, holding_discipline, diversification, trading_discipline, crowd_independence, sip_consistency)
+- Network boundary seam: `_fetch_equity_curve_data()` — fetches prices + computes actual/nifty curves via `compute_portfolio_value_series` + `_compute_nifty_comparison`
+- Lazy-load pattern: `_load_or_compute()` + deferred imports to avoid circular deps
+- Recommendation templates: `_SCENARIO_ACTIONS`, `_STOP_ACTIONS`, `_KEEP_ACTIONS`
+- `tests/portfolio_doctor/tools/test_report_tools.py` — 17 tests (6 build_action_plan, 4 get_action_plan, 7 get_full_report_data)
+- Tests mock `PORTFOLIO_DIR` and `_fetch_equity_curve_data` (network boundary)
 
-### Task 13: MCP Tools — report_tools.py (action plan + full report)
-- `portfolio_doctor/tools/report_tools.py`
-- `build_action_plan()` — Start/Stop/Keep framework
-- `get_full_report_data()` — aggregated JSON with canvas schema (spec §5 A–F)
-- Tests: `tests/portfolio_doctor/tools/test_report_tools.py`
+---
+
+## Remaining (in dependency order)
 
 ### Task 14: MCP Server — portfolio_doctor/server/app.py + .mcp.json
 - 6 tools: ingest_trades, portfolio_overview, behavioral_audit, compare_alternatives, action_plan, full_report_data
