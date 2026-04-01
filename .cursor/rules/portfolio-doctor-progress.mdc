@@ -8,7 +8,7 @@ alwaysApply: true
 **Spec:** `docs/superpowers/specs/2026-04-01-portfolio-doctor-design.md`
 **Plan:** `docs/superpowers/plans/2026-04-01-portfolio-doctor.md`
 
-## Status: Tasks 1–8 complete, Task 9 next
+## Status: Tasks 1–11 complete, Task 12 next
 
 ---
 
@@ -76,25 +76,47 @@ alwaysApply: true
 
 ---
 
+### Task 9: Behavioral Engine — 9 Detectors + Composite ✅
+- `portfolio_doctor/core/behavioral_engine.py` — 9 standalone detectors + composite
+- `detect_panic_selling()` — sells when Nifty >10% below 52-week high, cost = recovery opportunity
+- `detect_fomo_buying()` — buys when Nifty near ATH (<2% from peak) or stock >20% above 200 DMA
+- `detect_disposition_effect()` — FIFO lot matching, compares winner vs loser holding periods
+- `detect_overtrading()` — round-trip detection (buy+sell same stock within 30 days)
+- `detect_concentration_risk()` — single-stock weight thresholds (>20/30/40%)
+- `detect_herd_behavior()` — buys after >30% rally in prior month
+- `detect_anchoring_bias()` — sells within ±2% of avg buy price (breakeven anchoring)
+- `detect_sip_discipline()` — crash-period detection + SIP span checking
+- `detect_regular_plan_waste()` — "Regular" in scheme_name detection + TER drag estimate
+- `compute_behavioral_composite()` — weighted average with spec weights, top-3 issues by cost
+- Shared helpers: `_nearest_value()`, `_peak_in_window()`, `_find_crash_dates()`, `_score_to_severity()`
+- `tests/portfolio_doctor/core/test_behavioral_engine.py` — 31 tests (3 panic, 3 FOMO, 3 disposition, 3 overtrading, 3 concentration, 3 herd, 3 anchoring, 3 SIP, 3 regular plan, 4 composite)
+
+### Task 10: Alternatives Engine — 5 Scenario Comparisons ✅
+- `portfolio_doctor/core/alternatives_engine.py` — 5 scenario functions + orchestrator
+- `simulate_nifty_sip()` — same cash flows into Nifty 50 TRI proxy, nearest-NAV lookup
+- `simulate_buy_and_hold()` — same stocks, same buy timing, ignore all sells
+- `simulate_mf_sip()` — same cash flows into any MF scheme via NAV history
+- `simulate_model_portfolio()` — equity/debt split (70/30, 100/0, 50/50) with per-leg NAV tracking
+- `simulate_no_reentry()` — hold from first buy only, ignore re-entries after sells
+- `run_all_scenarios()` — orchestrates all 5, picks best MF for popular_mf_sip, adds vs_actual comparison
+- Shared helpers: `_nearest_nav()`, `_latest_nav()`, `_compute_return_pct()`, `_compute_xirr_for_scenario()`, `_build_vs_actual()`
+- `tests/portfolio_doctor/core/test_alternatives_engine.py` — 21 tests (4 nifty_sip, 4 buy_and_hold, 3 mf_sip, 3 model_portfolio, 3 no_reentry, 4 run_all_scenarios)
+
+---
+
+### Task 11: MCP Tools — portfolio_tools.py (ingest + overview) ✅
+- `portfolio_doctor/tools/portfolio_tools.py` — thin orchestration layer + file I/O
+- `ingest_client_trades(csv_path, client_name)` — parse → validate → build ledger → store 4 JSON files
+- `get_portfolio_overview(client_name)` — load stored data, fetch prices, compute returns/allocation/turnover/tax_drag
+- `_fetch_current_prices(positions)` — equity via `yf_latest`, MF via `get_nav_series`, sector via yfinance `.info`
+- `_load_trades(path)` — JSON loader with date string → date object reconstruction
+- `_save_json` / `_load_json` / `_client_dir` — file I/O helpers
+- `tests/portfolio_doctor/tools/test_portfolio_tools.py` — 12 tests (5 ingest, 6 overview, 1 load_trades)
+- Tests mock `validate_symbols` (network) and `_fetch_current_prices` (network boundary seam)
+
+---
+
 ## Remaining (in dependency order)
-
-### Task 9: Behavioral Engine — 9 Detectors + Composite
-- `portfolio_doctor/core/behavioral_engine.py`
-- Detectors: panic_selling, fomo_buying, disposition_effect, overtrading, concentration_risk, herd_behavior, anchoring_bias, sip_discipline, regular_plan_waste
-- Each returns `{pattern, score, severity, instances, cost_estimate, evidence_summary}`
-- `compute_behavioral_composite()` with spec weights
-- Tests: `tests/portfolio_doctor/core/test_behavioral_engine.py`
-
-### Task 10: Alternatives Engine — 5 Scenario Comparisons
-- `portfolio_doctor/core/alternatives_engine.py`
-- Scenarios: nifty_50_sip, popular_mf_sip, model_70_30, buy_and_hold, no_reentry
-- `run_all_scenarios()` orchestrator
-- Tests: `tests/portfolio_doctor/core/test_alternatives_engine.py`
-
-### Task 11: MCP Tools — portfolio_tools.py (ingest + overview)
-- `portfolio_doctor/tools/portfolio_tools.py`
-- `ingest_client_trades()` — parse, validate (incl. symbol validation), build ledger, store
-- `get_portfolio_overview()` — fetch prices, compute returns/allocation/turnover
 
 ### Task 12: MCP Tools — behavioral_tools.py + alternative_tools.py
 - `portfolio_doctor/tools/behavioral_tools.py` — `get_behavioral_audit()`
@@ -121,7 +143,7 @@ alwaysApply: true
 ## Parallelizable Tasks
 
 - ~~Tasks 4 + 5 can run in parallel (independent shared/ modules)~~ ✅ Done
-- Tasks 9 + 10 can run in parallel (independent engines, both depend on Task 8)
+- ~~Tasks 9 + 10 can run in parallel (independent engines, both depend on Task 8)~~ ✅ Done
 
 ## Key Design Decisions
 
