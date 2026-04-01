@@ -17,23 +17,14 @@ from typing import Optional
 
 import yfinance as yf
 
-from core.macro_client import _get_yf_session
+from shared.yf_client import get_yf_session as _get_yf_session
+from shared.yf_client import safe_float as _safe_float
 
 
 # ── Cache ─────────────────────────────────────────────────────────────
 
 _FUND_CACHE_TTL = 300  # 5 minutes
 _fund_cache: dict[str, tuple[dict, float]] = {}
-
-
-# ── Helpers ───────────────────────────────────────────────────────────
-
-def _safe_float(val) -> Optional[float]:
-    try:
-        f = float(val)
-        return round(f, 4) if f == f else None  # NaN check
-    except (TypeError, ValueError):
-        return None
 
 
 def _nse_to_yf(symbol: str) -> str:
