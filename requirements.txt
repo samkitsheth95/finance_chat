@@ -6,3 +6,6 @@ nsepython>=2.8
 yfinance>=0.2.50
 feedparser>=6.0.0
 gnews>=0.4.0
+mftool>=3.2
+scipy>=1.10.0
+pytest>=7.0.0

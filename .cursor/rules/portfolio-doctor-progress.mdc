@@ -1,0 +1,115 @@
+---
+description: Portfolio Doctor implementation progress — tracks what's done and what's next
+alwaysApply: true
+---
+
+# Portfolio Doctor — Implementation Progress
+
+**Spec:** `docs/superpowers/specs/2026-04-01-portfolio-doctor-design.md`
+**Plan:** `docs/superpowers/plans/2026-04-01-portfolio-doctor.md`
+
+## Status: Task 1 complete, Task 2 next
+
+---
+
+## Completed
+
+### Task 1: Test Infrastructure + Dependencies ✅
+- `pytest.ini` — test discovery config
+- `tests/conftest.py` — shared fixtures (sample equity/MF trades, CSV content, temp helpers)
+- `requirements.txt` — added `mftool>=3.2`, `scipy>=1.10.0`, `pytest>=7.0.0`
+- `.gitignore` — added `data/portfolios/` exclusion
+- `data/portfolios/.gitkeep` — directory placeholder
+- **Not yet committed** — ready to commit
+
+---
+
+## Remaining (in dependency order)
+
+### Task 2: Extract shared/yf_client.py from core/macro_client.py
+- Create `shared/__init__.py`, `shared/yf_client.py`
+- Slim `core/macro_client.py` to thin re-exports
+- Update `core/fundamentals_client.py` imports
+- Regression test: `tests/test_india_markets_unchanged.py`
+
+### Task 3: Extract shared/nse_utils.py from core/fundamentals_client.py
+- Create `shared/nse_utils.py` with `nse_to_yf()` (improved BSE handling)
+- Update `core/fundamentals_client.py` to import from shared
+- Tests: `tests/shared/test_nse_utils.py`
+
+### Task 4: Create shared/price_history.py
+- Batch historical OHLC via yfinance for any NSE stock or index
+- Handles index tickers (`^NSEI`) as passthrough, plain symbols via `nse_to_yf`
+- Tests: `tests/shared/test_price_history.py`
+
+### Task 5: Create shared/mf_client.py
+- MF NAV history via `mftool` (AMFI public data)
+- `validate_scheme_code()`, `fetch_nav_history()`, `get_nav_series()`
+- Tests: `tests/shared/test_mf_client.py`
+
+### Task 6: Portfolio Doctor Directory Scaffolding
+- Create `portfolio_doctor/` with `__init__.py` in core/, tools/, server/
+
+### Task 7: CSV Parser — Parse, Validate, Build Trade Ledger
+- `portfolio_doctor/core/csv_parser.py`
+- Functions: `parse_csv`, `validate_trades`, `validate_symbols`, `build_position_ledger`, `build_cash_flows`, `detect_sip_patterns`
+- FIFO for equity, per-lot tracking for MF
+- Tests: `tests/portfolio_doctor/core/test_csv_parser.py`
+
+### Task 8: Portfolio Engine — Holdings, Returns, XIRR, Allocation
+- `portfolio_doctor/core/portfolio_engine.py`
+- Functions: `compute_holdings`, `compute_xirr` (scipy brentq), `compute_returns` (incl. TWR + annualized), `compute_portfolio_value_series`, `compute_sector_allocation`, `compute_turnover`, `compute_tax_drag`
+- Tests: `tests/portfolio_doctor/core/test_portfolio_engine.py`
+
+### Task 9: Behavioral Engine — 9 Detectors + Composite
+- `portfolio_doctor/core/behavioral_engine.py`
+- Detectors: panic_selling, fomo_buying, disposition_effect, overtrading, concentration_risk, herd_behavior, anchoring_bias, sip_discipline, regular_plan_waste
+- Each returns `{pattern, score, severity, instances, cost_estimate, evidence_summary}`
+- `compute_behavioral_composite()` with spec weights
+- Tests: `tests/portfolio_doctor/core/test_behavioral_engine.py`
+
+### Task 10: Alternatives Engine — 5 Scenario Comparisons
+- `portfolio_doctor/core/alternatives_engine.py`
+- Scenarios: nifty_50_sip, popular_mf_sip, model_70_30, buy_and_hold, no_reentry
+- `run_all_scenarios()` orchestrator
+- Tests: `tests/portfolio_doctor/core/test_alternatives_engine.py`
+
+### Task 11: MCP Tools — portfolio_tools.py (ingest + overview)
+- `portfolio_doctor/tools/portfolio_tools.py`
+- `ingest_client_trades()` — parse, validate (incl. symbol validation), build ledger, store
+- `get_portfolio_overview()` — fetch prices, compute returns/allocation/turnover
+
+### Task 12: MCP Tools — behavioral_tools.py + alternative_tools.py
+- `portfolio_doctor/tools/behavioral_tools.py` — `get_behavioral_audit()`
+- `portfolio_doctor/tools/alternative_tools.py` — `get_alternative_scenarios()`
+
+### Task 13: MCP Tools — report_tools.py (action plan + full report)
+- `portfolio_doctor/tools/report_tools.py`
+- `build_action_plan()` — Start/Stop/Keep framework
+- `get_full_report_data()` — aggregated JSON with canvas schema (spec §5 A–F)
+- Tests: `tests/portfolio_doctor/tools/test_report_tools.py`
+
+### Task 14: MCP Server — portfolio_doctor/server/app.py + .mcp.json
+- 6 tools: ingest_trades, portfolio_overview, behavioral_audit, compare_alternatives, action_plan, full_report_data
+- System prompt from spec §4
+- Update `.mcp.json` with portfolio-doctor entry
+
+### Task 15: Update .cursor/rules and Project Memory
+- Update `project-architecture.mdc` with Portfolio Doctor section + shared/ table
+- Create `portfolio-doctor-patterns.mdc` (architecture, data storage, detector pattern, XIRR convention)
+- Qualify "no portfolio tracking" to "in india-markets"
+
+---
+
+## Parallelizable Tasks
+
+- Tasks 4 + 5 can run in parallel (independent shared/ modules)
+- Tasks 9 + 10 can run in parallel (independent engines, both depend on Task 8)
+
+## Key Design Decisions
+
+- **FIFO for equity, per-lot for MF** — matches Indian tax conventions
+- **Scores: -1.0 to +1.0 in engines/tools, 0-10 only in full_report_data for display**
+- **Cash flows built at parse time** (csv_parser), re-exported via portfolio_engine
+- **Sector-over-time and churn-as-% deferred to v2**
+- **5 primary scenarios for UI; 100% equity and 50/50 as metadata rows**
