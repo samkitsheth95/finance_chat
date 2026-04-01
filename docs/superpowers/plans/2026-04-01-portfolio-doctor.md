@@ -877,7 +877,7 @@ git commit -m "feat: add shared/mf_client.py — MF NAV history via mftool"
 - Create: `portfolio_doctor/tools/__init__.py`
 - Create: `portfolio_doctor/server/__init__.py`
 
-- [ ] **Step 1: Create all package markers**
+- [x] **Step 1: Create all package markers**
 
 ```bash
 mkdir -p portfolio_doctor/core portfolio_doctor/tools portfolio_doctor/server
@@ -885,7 +885,7 @@ touch portfolio_doctor/__init__.py portfolio_doctor/core/__init__.py \
       portfolio_doctor/tools/__init__.py portfolio_doctor/server/__init__.py
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add portfolio_doctor/
@@ -903,7 +903,7 @@ git commit -m "chore: scaffold portfolio_doctor package directories"
 This is the most important module — it's the entry point for all data.
 Split into phases: parse → validate → build positions → build cash flows → detect SIPs.
 
-- [ ] **Step 1: Write parser tests**
+- [x] **Step 1: Write parser tests**
 
 Create `tests/portfolio_doctor/core/test_csv_parser.py`:
 
@@ -993,12 +993,12 @@ class TestDetectSipPatterns:
         assert patterns[0]["frequency"] == "monthly"
 ```
 
-- [ ] **Step 2: Run tests — verify fail**
+- [x] **Step 2: Run tests — verify fail**
 
 Run: `.venv/bin/python -m pytest tests/portfolio_doctor/core/test_csv_parser.py -v`
 Expected: FAIL (module not found)
 
-- [ ] **Step 3: Implement csv_parser.py — parse_csv function**
+- [x] **Step 3: Implement csv_parser.py — parse_csv function**
 
 Create `portfolio_doctor/core/csv_parser.py`. Implement `parse_csv(csv_path) -> list[dict]`:
 - Read CSV with pandas
@@ -1010,7 +1010,7 @@ Create `portfolio_doctor/core/csv_parser.py`. Implement `parse_csv(csv_path) -> 
 - Sort by date ascending
 - Raise `ValueError` if required columns missing
 
-- [ ] **Step 4: Implement validate_trades function**
+- [x] **Step 4: Implement validate_trades function**
 
 Add `validate_trades(trades: list[dict]) -> list[str]` to `csv_parser.py`:
 - Track running quantity per symbol
@@ -1019,14 +1019,14 @@ Add `validate_trades(trades: list[dict]) -> list[str]` to `csv_parser.py`:
 - Warn (don't reject) on weekend dates
 - Return list of warning strings
 
-- [ ] **Step 5: Implement build_position_ledger function**
+- [x] **Step 5: Implement build_position_ledger function**
 
 Add `build_position_ledger(trades: list[dict]) -> dict` to `csv_parser.py`:
 - For EQUITY: FIFO cost basis tracking. Each position has `quantity`, `avg_cost`, `invested`, `instrument_type`
 - For MF: per-lot tracking. Each purchase is a separate lot `{"date", "quantity", "price", "amount"}`. Sells consume oldest lots first (FIFO). Position has `lots`, `total_quantity`, `instrument_type`
 - Return dict keyed by symbol
 
-- [ ] **Step 6: Implement build_cash_flows function**
+- [x] **Step 6: Implement build_cash_flows function**
 
 Add `build_cash_flows(trades: list[dict]) -> list[dict]` to `csv_parser.py`:
 - BUY/SIP/SWITCH_IN = negative cash flow (money goes out)
@@ -1041,7 +1041,7 @@ construction is pure parsing (no pricing data needed), so it lives in csv_parser
 from portfolio_doctor.core.csv_parser import build_cash_flows as compute_cash_flows
 ```
 
-- [ ] **Step 7: Implement detect_sip_patterns function**
+- [x] **Step 7: Implement detect_sip_patterns function**
 
 Add `detect_sip_patterns(trades: list[dict]) -> list[dict]` to `csv_parser.py`:
 - Filter MF trades with action "SIP"
@@ -1049,7 +1049,7 @@ Add `detect_sip_patterns(trades: list[dict]) -> list[dict]` to `csv_parser.py`:
 - For each group: check if trades are ~monthly (25–35 day gaps), similar amounts (within 20%)
 - Return list of `{"scheme_code", "scheme_name", "frequency", "avg_amount", "start_date", "end_date", "total_sips"}`
 
-- [ ] **Step 7.5: Implement symbol validation at ingest time**
+- [x] **Step 7.5: Implement symbol validation at ingest time**
 
 Add `validate_symbols(trades: list[dict]) -> list[str]` to `csv_parser.py`:
 - For EQUITY trades: call `shared.nse_utils.nse_to_yf(symbol)` and do a lightweight
@@ -1063,12 +1063,12 @@ Add `validate_symbols(trades: list[dict]) -> list[str]` to `csv_parser.py`:
 Note: Symbol validation requires network calls, so keep it separate from pure `validate_trades`.
 Test with mocked yfinance/mftool.
 
-- [ ] **Step 8: Run tests — verify pass**
+- [x] **Step 8: Run tests — verify pass**
 
 Run: `.venv/bin/python -m pytest tests/portfolio_doctor/core/test_csv_parser.py -v`
 Expected: All PASSED
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add portfolio_doctor/core/csv_parser.py tests/portfolio_doctor/
