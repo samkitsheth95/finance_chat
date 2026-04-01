@@ -19,23 +19,13 @@ import yfinance as yf
 
 from shared.yf_client import get_yf_session as _get_yf_session
 from shared.yf_client import safe_float as _safe_float
+from shared.nse_utils import nse_to_yf as _nse_to_yf
 
 
 # ── Cache ─────────────────────────────────────────────────────────────
 
 _FUND_CACHE_TTL = 300  # 5 minutes
 _fund_cache: dict[str, tuple[dict, float]] = {}
-
-
-def _nse_to_yf(symbol: str) -> str:
-    """Map NSE trading symbol to Yahoo Finance ticker."""
-    sym = symbol.upper().strip()
-    for prefix in ("NSE:", "BSE:"):
-        if sym.startswith(prefix):
-            sym = sym[len(prefix):]
-    if not sym.endswith(".NS") and not sym.endswith(".BO"):
-        sym = f"{sym}.NS"
-    return sym
 
 
 # ── Public API ────────────────────────────────────────────────────────
