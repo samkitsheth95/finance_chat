@@ -82,8 +82,8 @@ finance_chat/
 │       └── app.py                    ← Portfolio Doctor MCP
 │
 ├── data/
-│   ├── daily/                        ← Existing india-markets snapshots
-│   └── portfolios/                   ← NEW: Client portfolio data
+│   ├── daily/                        ← Existing india-markets snapshots (gitignored)
+│   └── portfolios/                   ← NEW: Client portfolio data (gitignored — contains client trading data)
 │
 ├── .mcp.json                         ← Updated: both MCPs
 ├── scripts/
@@ -226,15 +226,18 @@ Composite behavioral score weights:
 - Herd + anchoring: 10%
 - SIP discipline: 10% (redistributed if no MF trades)
 
+Score mapping: engines return -1.0 to +1.0 internally. `full_report_data`
+pre-transforms to 0-10 scale for display: `(score + 1) * 5`.
+
 ### Engine 3: Alternatives Engine (alternatives_engine.py)
 
 The "what if" layer — same cash flows, different strategies.
 
 | Scenario | Logic |
 |----------|-------|
-| Nifty 50 SIP | Same cash inflows on same dates, buy Nifty 50 TRI (total return index including dividends) |
-| Popular MF SIPs | Same cash flows into: UTI Nifty 50 Index, Parag Parikh Flexi Cap, HDFC Balanced Advantage, HDFC Short Term Debt. NAV from `mftool` |
-| Model portfolios | 100% equity (Nifty TRI), 70/30 equity-debt, 50/50. Debt = liquid fund NAV |
+| Nifty 50 SIP | Same cash inflows on same dates, buy Nifty 50 TRI. yfinance `^NSEI` is price-only — use `0P0000XVOA.BO` (UTI Nifty 50 Index Direct Growth NAV from mftool) as TRI proxy if yfinance TRI ticker unavailable |
+| Popular MF SIPs | Same cash flows into: UTI Nifty 50 Index (scheme 120716), Parag Parikh Flexi Cap (scheme 122639), HDFC Balanced Advantage (scheme 118989), HDFC Short Term Debt Direct (scheme 119065). NAV from `mftool` |
+| Model portfolios | 100% equity (Nifty TRI proxy above), 70/30 equity-debt, 50/50. Debt leg = HDFC Liquid Fund Direct Growth (scheme 119062) |
 | Buy-and-hold same stocks | Same stocks, same buy timing, but never sell. Current value if held |
 | Same stocks, no re-entry | For stocks bought → sold → bought again: what if held from first buy? Isolates cost of "trading around" a position |
 
