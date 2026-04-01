@@ -8,7 +8,7 @@ alwaysApply: true
 **Spec:** `docs/superpowers/specs/2026-04-01-portfolio-doctor-design.md`
 **Plan:** `docs/superpowers/plans/2026-04-01-portfolio-doctor.md`
 
-## Status: Tasks 1–7 complete, Task 8 next
+## Status: Tasks 1–8 complete, Task 9 next
 
 ---
 
@@ -62,14 +62,21 @@ alwaysApply: true
 - `tests/portfolio_doctor/core/test_csv_parser.py` — 26 tests (6 parse, 4 validate, 3 symbols, 5 ledger, 4 cashflow, 4 SIP)
 - Tests use `monkeypatch` for symbol validation mocking (no pytest-mock dependency)
 
+### Task 8: Portfolio Engine — Holdings, Returns, XIRR, Allocation ✅
+- `portfolio_doctor/core/portfolio_engine.py` — the math layer
+- `compute_holdings()` — FIFO equity + per-lot MF, as_of date filtering
+- `compute_xirr()` — scipy.optimize.brentq solver, returns annualized rate
+- `compute_returns()` — per-position returns, portfolio XIRR, total invested/value
+- `compute_portfolio_value_series()` — daily values from holdings × prices
+- `compute_sector_allocation()` — sector weights + instrument type split
+- `compute_turnover()` — sell amounts / avg portfolio value
+- `compute_tax_drag()` — STCG (15%) + LTCG (10% above ₹1L) on realized gains
+- `compute_cash_flows` — re-export of `csv_parser.build_cash_flows`
+- `tests/portfolio_doctor/core/test_portfolio_engine.py` — 27 tests (5 holdings, 5 XIRR, 3 returns, 3 value series, 3 allocation, 3 turnover, 4 tax drag, 1 re-export)
+
 ---
 
 ## Remaining (in dependency order)
-
-### Task 8: Portfolio Engine — Holdings, Returns, XIRR, Allocation
-- `portfolio_doctor/core/portfolio_engine.py`
-- Functions: `compute_holdings`, `compute_xirr` (scipy brentq), `compute_returns` (incl. TWR + annualized), `compute_portfolio_value_series`, `compute_sector_allocation`, `compute_turnover`, `compute_tax_drag`
-- Tests: `tests/portfolio_doctor/core/test_portfolio_engine.py`
 
 ### Task 9: Behavioral Engine — 9 Detectors + Composite
 - `portfolio_doctor/core/behavioral_engine.py`
