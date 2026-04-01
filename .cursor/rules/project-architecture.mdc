@@ -66,15 +66,19 @@ Uses accumulated daily snapshots + historical OHLC to answer predictive question
 | A1 | Historical query tools | `tools/history_tools.py` | ✅ **DONE** — `history_summary(days)`, `fii_trend(days)`, `similar_setups(conditions)`, `drawdown_status()` — expose stored snapshots to Claude. Not a numbered layer; cross-cutting utility over daily store. | 61+ snapshots (done) |
 | A2 | Index technicals | `tools/technicals_tools.py` | ✅ **DONE** — 20/50/200 DMA, RSI, Bollinger, MACD, support/resistance for Nifty/BankNifty. Scorer functions (`score_trend()`, `score_rsi()`, `score_bollinger()`) pending for A3 integration | Uses live OHLC from Kite |
 | A3 | Multi-day regime detection | `core/signal_scorer.py` | ✅ **DONE** — 5-day rolling FII sum → EXODUS trigger; VIX 3-day rate-of-change → FEAR trigger; Nifty vs 200 DMA (from Kite technicals); new CORRECTION regime (>5% drawdown + VIX rising). `market_brief()` now fetches multi-day context from daily store + Nifty technicals in parallel. | A1 + A2 |
-| A4 | Volatility range forecast | `tools/forecast_tools.py` | `forecast_range(underlying, horizon_days)` — synthesizes VIX-implied range, OI walls, Bollinger bands, historical range stats into expected containment zone | A2 |
-| A5 | Automated insights | `tools/signal_tools.py` | `daily_insights()` — percentile rankings vs history, unusual divergence flags, trend-break detection. Runs alongside `market_brief()` | 120+ snapshots (~Jul 2026) |
+| A4 | Volatility range forecast | `tools/forecast_tools.py` | ✅ **DONE** — `forecast_range(underlying, horizon_days)` — multi-lens range estimation: VIX-implied 1σ/2σ bands, Bollinger realized range, historical rolling-window percentiles, OI-derived containment zone. Each lens labelled with validity and limitations. Parallel fetch of VIX + option chain + technicals. | A2 |
+| A5 | Automated insights | `tools/insights_tools.py` | ✅ **DONE** — `daily_insights()` — percentile rankings for 8 metrics vs all history, extreme reading flags (top/bottom 5-10th pctile), cross-metric divergence detection (VIX vs RSI, FII vs composite, etc.), trend-break detection (VIX regime shifts, 200 DMA crosses, FII reversals). Sample-size-aware confidence. No live API calls. | snapshots (works now, improves with more data) |
 
 **System prompt additions for Track A:**
 - "How has the market been?" → `history_summary(30)`
 - "Are FIIs still selling?" → `fii_trend(5)`
 - "Should I buy the dip?" → `similar_setups()` + `drawdown_status()`
-- "What's the likely range this week?" → `forecast_range()`
+- "What's the likely range this week?" → `forecast_range("NIFTY", 5)`
+- "How much can BankNifty move?" → `forecast_range("BANKNIFTY", 5)`
 - "What happened last time VIX spiked like this?" → `similar_setups()`
+- "Is VIX unusually high right now?" → `daily_insights()` (check VIX percentile)
+- "What's unusual about today?" → `daily_insights()` (divergences + trend breaks)
+- "Are conditions extreme?" → `daily_insights()` (extreme readings)
 
 ### Track B — Stock-Specific Signals
 

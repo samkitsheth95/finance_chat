@@ -14,6 +14,8 @@ from tools.history_tools import (
     similar_setups as get_similar_setups,
     drawdown_status as get_drawdown_status,
 )
+from tools.insights_tools import daily_insights as get_daily_insights
+from tools.forecast_tools import forecast_range as get_forecast_range
 
 mcp = FastMCP(
     "india-markets",
@@ -97,6 +99,21 @@ Historical Query Tools (stored daily snapshots):
   • FII flow persistence: cumulative flows, streaks, trend direction, DII offset
   • Historical pattern matching: find past days with similar conditions + next-day outcomes
   • Drawdown tracking: peak-to-trough analysis with institutional flow context
+
+Automated Insights (daily_insights):
+  • Percentile rankings for ~8 key metrics vs all stored history
+  • Flags extreme readings (top/bottom 5–10th percentile) with directional labels
+  • Cross-metric divergence detection (e.g., VIX vs RSI, FII flow vs composite)
+  • Trend-break detection: VIX regime shifts, 200 DMA crosses, FII flow reversals
+  • Sample-size-aware confidence labels (very_low → low → moderate → high)
+
+Volatility Range Forecast (forecast_range):
+  • Multi-lens range estimation: VIX-implied statistical bands (1σ/2σ),
+    Bollinger realized range, historical rolling-window range percentiles,
+    and OI-derived containment zone (near-expiry only)
+  • Each lens labelled with validity, limitations, and interpretation guidance
+  • Key levels summary for quick reference (VIX bands + Bollinger + OI walls)
+  • Honest framing: "VIX implies X, history shows Y, OI suggests Z" — not a prediction
 
 HOW TO USE THE TOOLS:
 
@@ -284,6 +301,27 @@ HOW TO USE THE TOOLS:
     → Classifies: near_highs / mild_pullback / moderate_correction / correction /
       deep_correction / bear_market
 
+  insights()
+    → Use alongside market_brief() for any broad market question to add
+      "where are we relative to history?" context
+    → "Is VIX unusually high right now?" → insights() (check VIX percentile)
+    → "Are conditions extreme?" → insights() (check extreme readings)
+    → "What's unusual about today?" → insights() (check divergences + trend breaks)
+    → Returns percentile rankings, extreme flags, divergences, trend breaks
+    → No live API calls — reads from stored snapshots only (fast)
+
+  range_forecast(underlying, horizon_days)
+    → Use when asked "what's the likely range this week?", "where will Nifty trade?",
+      "what range is the market pricing?", "how much can Nifty move?"
+    → underlying: "NIFTY" (default) or "BANKNIFTY"
+    → horizon_days: trading days ahead (default 5 = 1 week)
+    → Returns multiple independent range estimates (VIX-implied, Bollinger,
+      historical, OI containment) — each with validity labels
+    → "What's the likely Nifty range this week?" → range_forecast("NIFTY", 5)
+    → "How much can BankNifty move?" → range_forecast("BANKNIFTY", 5)
+    → "What range is VIX pricing?" → range_forecast("NIFTY", 5)
+    → IMPORTANT: Present as "multiple perspectives" not "prediction"
+
 SIGNAL WEIGHTING GUIDANCE (for interpreting market_brief):
 
   When you receive a market_brief(), the default composite uses regime-aware
@@ -367,6 +405,15 @@ STOCK-LEVEL ANALYSIS:
     "Should I buy / enter X?"    → Technicals +15%, Momentum +5%, News -10%
     "What are X's fundamentals?" → Valuation +10%, Growth +10%, Technicals -20%
     "Is X outperforming?"        → Relative strength +15%, Technicals +5%, Valuation -20%
+
+HISTORICAL CONTEXT & RANGE ESTIMATION:
+  For any broad market question, consider calling insights() alongside market_brief().
+  insights() is fast (no live API calls) and adds percentile context that makes
+  your analysis more grounded ("VIX is elevated AND at the 92nd percentile vs history").
+
+  For range/forecast questions, use range_forecast(). Present the multiple lenses
+  honestly — convergence across lenses = higher confidence; divergence = uncertainty.
+  Never present any single lens as "the answer."
 
 CURRENT LIMITATIONS:
   • GIFT Nifty pre-market indicator — requires NSE IFSC data feed
@@ -1084,6 +1131,99 @@ def stock_brief(symbol: str) -> dict:
       6. Interpret recent_news headlines for catalysts Claude couldn't auto-score
     """
     return get_stock_brief(symbol)
+
+
+@mcp.tool()
+def insights() -> dict:
+    """
+    Percentile rankings, divergence detection, and trend-break flags
+    for today's market values vs all stored history.
+
+    Answers: "Where are we relative to history?" — for every key metric.
+
+    Returns:
+      date:              Snapshot date being analyzed
+      total_snapshots:   Total snapshots in the dataset
+      data_coverage:     Backfill vs live-only sample sizes with explanation.
+                         Backfilled metrics (VIX, RSI, Bollinger, DMAs, day range)
+                         rank across ~1400 trading days. Live-only metrics (FII flows,
+                         composite score) rank across ~60+ live snapshots.
+      rankings:          Per-metric percentile rank vs history:
+                           vix_close, nifty_rsi, bollinger_bandwidth, day_range,
+                           nifty_vs_200dma, nifty_change, fii_net, composite_score
+                         EACH metric includes its own:
+                           sample_size, confidence (per-metric, not global),
+                           data_source ("backfill" or "live_only"),
+                           value, percentile (0–100), sample min/max/median
+                         Flagged if extreme: unusually_high_bearish, unusually_low_bullish, etc.
+      extreme_readings:  List of metrics at historical extremes (top/bottom 5–10%)
+      divergences:       Cross-metric disagreements, e.g.:
+                           "VIX vs RSI divergence" — fear gauge disagrees with momentum
+                           "FII flows vs composite" — institutional action vs overall signal
+                         Each with the two metrics, their percentiles, sample sizes, and gap.
+                         Includes caveat when comparing metrics with very different sample sizes.
+      trend_breaks:      Recent threshold crossings:
+                           VIX regime shifts, 200 DMA crosses, FII streak reversals,
+                           market regime changes
+
+    Use when asked:
+      • "Is VIX unusually high?" → check VIX percentile
+      • "Are conditions extreme right now?" → check extreme_readings
+      • "What's unusual about today's market?" → divergences + trend_breaks
+      • "How does today compare to history?" → full rankings
+      • Alongside market_brief() for any broad market question
+
+    No live API calls — reads from stored daily snapshots only. Very fast.
+    Call this freely alongside other tools for enriched context.
+    """
+    return get_daily_insights()
+
+
+@mcp.tool()
+def range_forecast(
+    underlying: str = "NIFTY",
+    horizon_days: int = 5,
+) -> dict:
+    """
+    Multi-lens range estimation: where might the index trade over N days?
+
+    Synthesizes four independent methods, each with different validity:
+      1. VIX-implied statistical range (1σ ≈ 68%, 2σ ≈ 95% containment)
+      2. Bollinger Bands realized range (backward-looking, 20-day)
+      3. Historical rolling-window range from stored snapshots
+      4. OI-derived containment zone (valid near expiry only)
+
+    Args:
+      underlying:    "NIFTY" (default) or "BANKNIFTY"
+      horizon_days:  Trading days ahead. Default: 5 (1 week).
+                     Use 1 for intraday/next-day, 10 for 2 weeks, 20 for monthly.
+
+    Returns:
+      lenses:           Array of independent range estimates, each with:
+                          method, values, validity note, interpretation
+      oi_containment:   OI walls + max pain zone (null if no options data).
+                          Includes validity label based on days to expiry.
+      key_levels:       Quick-reference dict: spot, VIX 1σ low/high,
+                          Bollinger lower/upper, OI support/resistance, max pain
+      interpretation_guide: How to synthesize the lenses
+
+    Use when asked:
+      • "What's the likely Nifty range this week?"
+        → range_forecast("NIFTY", 5)
+      • "How much can BankNifty move in the next 2 weeks?"
+        → range_forecast("BANKNIFTY", 10)
+      • "What move is VIX pricing in?"
+        → range_forecast() — check VIX-implied lens
+      • "Where are the key levels for Nifty?"
+        → range_forecast() — check key_levels + OI containment
+      • "Is the current range normal or unusual?"
+        → range_forecast() — check historical lens current_window percentile
+
+    IMPORTANT: Present results as "multiple perspectives" not as a prediction.
+    When lenses agree (e.g., VIX bands and OI walls converge), say so — that
+    increases confidence. When they diverge, flag the uncertainty.
+    """
+    return get_forecast_range(underlying, horizon_days)
 
 
 if __name__ == "__main__":
