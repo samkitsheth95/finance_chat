@@ -8,7 +8,7 @@ alwaysApply: true
 **Spec:** `docs/superpowers/specs/2026-04-01-portfolio-doctor-design.md`
 **Plan:** `docs/superpowers/plans/2026-04-01-portfolio-doctor.md`
 
-## Status: Tasks 1–11 complete, Task 12 next
+## Status: Tasks 1–12 complete, Task 13 next
 
 ---
 
@@ -116,11 +116,19 @@ alwaysApply: true
 
 ---
 
-## Remaining (in dependency order)
-
-### Task 12: MCP Tools — behavioral_tools.py + alternative_tools.py
+### Task 12: MCP Tools — behavioral_tools.py + alternative_tools.py ✅
 - `portfolio_doctor/tools/behavioral_tools.py` — `get_behavioral_audit()`
+- `get_behavioral_audit(client_name)` — loads trades/positions/SIP patterns, fetches Nifty + stock price data, runs all 9 detectors + composite, saves to `behavioral_audit.json`
+- Network boundary seams: `_fetch_nifty_data()`, `_fetch_stock_data()` (mockable for tests)
+- Date reconstruction helpers: `_load_sip_patterns()`, `_load_cashflows()`
 - `portfolio_doctor/tools/alternative_tools.py` — `get_alternative_scenarios()`
+- `get_alternative_scenarios(client_name)` — loads trades/cashflows, loads or computes overview for actual returns, fetches NAVs for Nifty proxy (120716) + 4 popular MFs + debt fund (119062), runs `run_all_scenarios`, saves to `alternatives.json`
+- Network boundary seam: `_fetch_scheme_navs()` (mockable for tests)
+- Extracts current prices from overview holdings (avoids redundant network calls)
+
+---
+
+## Remaining (in dependency order)
 
 ### Task 13: MCP Tools — report_tools.py (action plan + full report)
 - `portfolio_doctor/tools/report_tools.py`
