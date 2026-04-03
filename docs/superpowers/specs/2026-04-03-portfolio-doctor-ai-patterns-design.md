@@ -34,13 +34,21 @@ Two new engines layered on top of existing code. Nothing existing is rewritten.
 Existing (unchanged):
   csv_parser → trades, cashflows, sip_patterns, positions
   portfolio_engine → holdings, returns, value_series, allocation
-  behavioral_engine → 9 detectors + composite
+  behavioral_engine → 9 detectors + composite (known patterns, deterministic)
   alternatives_engine → 5 constant scenarios
 
-New:
-  pattern_engine → regime tags, sequences, loops, drift, calendar, drawdown responses
+New — Code (deterministic):
+  pattern_engine:
+    enrichment    → regime-tagged trades + enriched trade summary text
+    known patterns → sequences, loops, calendar effects, drawdown responses
+    temporal drift → multi-scale behavioral evolution (granular + phase + halves)
   scenario_engine → behavior-corrected replay, regime-aware, discipline-enforced, SIP-through-crash
-  Claude → cross-pattern chains, unanticipated patterns, severity judgment, narrative
+
+New — AI (Claude at conversation time):
+  receives: enriched trade summary (full history) + coded pattern results + scenarios
+  discovers: patterns not pre-coded (cross-instrument flows, symbol habits, sizing shifts)
+  synthesizes: cross-pattern chains, severity judgment, behavioral narrative
+  selects: which insights to highlight, how to frame recommendations
 ```
 
 ## Shared Data Types
@@ -66,8 +74,15 @@ If no value found, the trade is skipped for that analysis with a warning.
 
 ## Pattern Engine (`portfolio_doctor/core/pattern_engine.py`)
 
-Deterministic enrichment of the trade history. All functions are pure
-computation — no LLM calls, no network beyond what's passed in.
+Two responsibilities:
+1. **Enrichment** — regime-tag every trade with market context so Claude can
+   reason about them (deterministic, pure computation)
+2. **Known pattern detection** — find sequences, loops, calendar effects, and
+   drawdown responses using explicit rules (deterministic baseline)
+
+Claude receives BOTH the enriched trades AND the coded pattern results. The
+coded results are a starting point — Claude discovers additional patterns from
+the enriched data that no rule anticipated. See "Claude's Role" section.
 
 ### Regime Tagging
 
@@ -153,23 +168,35 @@ Groups sequences by type and symbol to identify repeating cycles:
 A loop requires `occurrences >= 2`. `is_worsening` is true if the cost of the
 most recent half of occurrences exceeds the earlier half.
 
-### Temporal Drift
+### Temporal Drift (Multi-Scale)
 
-`compute_temporal_drift(trades, nifty_data, stock_price_data, window_months=12) → dict`
+`compute_temporal_drift(trades, nifty_data, stock_price_data) → dict`
 
-Splits the client's full trading history into rolling windows (default 12
-months, sliding by 6 months). Runs a subset of existing behavioral detectors
-per window:
+Analyzes behavioral change at multiple time scales, adaptive to the client's
+history length. Runs a subset of existing behavioral detectors per window:
 - `detect_overtrading` (trade frequency)
 - `detect_panic_selling` (sell during drawdowns)
 - `detect_fomo_buying` (buy near peaks)
 - `detect_herd_behavior` (buy after rallies)
 
-Returns a single dict with two keys:
+**Three analysis scales:**
+
+| Scale | Window size | Slide | Purpose | Min history |
+|---|---|---|---|---|
+| `granular` | 12 months | 6 months | Detect recent shifts | 18 months |
+| `phase` | Split at major Nifty drawdowns (>10%) | Event-driven | Compare behavior across market cycles | 3 years + ≥1 drawdown |
+| `halves` | First half vs second half of full history | — | Simple evolution check | 2 years |
+
+`phase` windows are defined by major market events: split the timeline at
+each Nifty drawdown >10% from peak. Each segment between drawdowns is one
+phase, labeled by its date range. This naturally groups behavior by market
+cycle rather than arbitrary calendar boundaries.
+
+Returns a single dict:
 
 ```python
 {
-    "windows": [
+    "granular_windows": [
         {
             "period": "2020-H1",
             "start_date": date,
@@ -181,15 +208,32 @@ Returns a single dict with two keys:
                 "fomo_buying": float,
                 "herd_behavior": float,
             },
-            "composite": float,   # simple average of the 4 scores
+            "composite": float,
         },
         ...
     ],
+    "phase_windows": [
+        {
+            "phase": "Pre-COVID (2018-01 to 2020-02)",
+            "start_date": date,
+            "end_date": date,
+            "trade_count": int,
+            "scores": {...},
+            "composite": float,
+            "triggering_drawdown_pct": float | None,
+        },
+        ...
+    ],
+    "halves": {
+        "first_half": {"period": str, "scores": {...}, "composite": float},
+        "second_half": {"period": str, "scores": {...}, "composite": float},
+        "change": float,   # second_half.composite - first_half.composite
+    },
     "trend": {
         "trend_direction": "worsening" | "improving" | "stable",
-        "worst_period": str,    # period label with lowest composite
-        "best_period": str,     # period label with highest composite
-        "inflection_points": list[str],  # period labels where composite changed direction by >0.2
+        "worst_period": str,
+        "best_period": str,
+        "inflection_points": list[str],
     },
 }
 ```
@@ -197,10 +241,18 @@ Returns a single dict with two keys:
 The per-window `composite` is the simple average of the 4 detector scores
 (not the full 9-detector weighted composite from `behavioral_engine`).
 
-**Degraded mode**: if the client's history spans <18 months, only one window
-is produced (the full history). `trend` fields are set to `"stable"` with
-empty `inflection_points`. This avoids misleading trend analysis from
-insufficient data.
+`trend` is computed from `granular_windows` if ≥3 exist, else from `halves`.
+Direction: `worsening` if composite declined >0.15 over last 3+ windows,
+`improving` if increased >0.15, else `stable`. Inflection points are windows
+where composite changed direction by >0.2.
+
+**Degraded mode by history length:**
+
+| History | What runs |
+|---|---|
+| <18 months | `halves` only (full history = one window). `granular_windows` and `phase_windows` empty. `trend_direction` = `"stable"`. |
+| 18 months – 3 years | `granular_windows` + `halves`. `phase_windows` empty unless a drawdown occurred. |
+| 3+ years | All three scales. |
 
 ### Calendar Pattern Detection
 
@@ -251,6 +303,29 @@ counting the same correction multiple times.
 }
 ```
 
+### Enriched Trade Summary (for Claude)
+
+`build_enriched_trade_summary(regime_tagged_trades) → str`
+
+Produces a compact, human-readable text representation of the full trade
+history designed for Claude to scan and discover patterns. One line per trade:
+
+```
+2016-03-10 | BUY   | RELIANCE  | ₹45,000 | 20 shares @ ₹2,250 | bull    | Nifty -1% from peak | VIX 15
+2016-09-05 | SIP   | 119551    | ₹5,000  | 48 units  @ ₹103.8 | sideways| Nifty -4% from peak | VIX 16
+2020-03-23 | SELL  | RELIANCE  | ₹28,000 | 20 shares @ ₹1,400 | crash   | Nifty -35% from peak| VIX 72
+2020-04-15 | BUY   | RELIANCE  | ₹33,000 | 20 shares @ ₹1,650 | recovery| Nifty -22% from peak| VIX 38
+```
+
+Format: `date | action | symbol | amount | qty @ price | regime | nifty_context | vix`
+
+For clients with >500 trades, the summary is NOT truncated. A 2,000-trade
+summary at ~100 chars/line is ~200K chars — within Claude's context window.
+The full history is essential for pattern discovery.
+
+This text is returned as part of the `deep_analysis` tool output so Claude
+can reason about it at conversation time.
+
 ### Pattern Summary
 
 `build_pattern_summary(trades, nifty_data, vix_data, stock_price_data, sip_patterns, behavioral_audit) → dict`
@@ -262,21 +337,24 @@ Orchestrates all of the above into a single output:
     "client_name": str,
     "analysis_date": date,
     "trade_span_years": float,
-    "regime_tagged_trades": list,   # all trades with regime annotations
+    "enriched_trade_summary": str,   # compact text for Claude (see above)
+    "regime_tagged_trades": list,    # all trades with regime annotations (structured)
     "sequences": list,
     "loops": list,
-    "temporal_drift": {
-        "windows": list,
-        "trend": dict,
-    },
+    "temporal_drift": dict,          # multi-scale: granular + phase + halves + trend
     "calendar_patterns": list,
     "drawdown_responses": list,
     "costliest_loop": dict | None,
-    "behavioral_evolution": str,    # "worsening" | "improving" | "stable"
+    "behavioral_evolution": str,     # "worsening" | "improving" | "stable"
 }
 ```
 
 Saved to `data/portfolios/{client}/pattern_summary.json`.
+
+**Note on `enriched_trade_summary`**: this is the key input for Claude's
+AI-driven pattern discovery. The deterministic results (sequences, loops,
+calendar patterns) serve as a baseline that Claude can confirm, override,
+or augment with patterns it discovers from scanning the full enriched history.
 
 ## Scenario Engine (`portfolio_doctor/core/scenario_engine.py`)
 
@@ -461,22 +539,48 @@ the reason displayed below each row.
 
 ## Claude's Role at Conversation Time
 
-Claude receives `pattern_summary.json` + `behavioral_audit.json` +
-`dynamic_scenarios.json` and performs reasoning that cannot be pre-coded:
+Claude receives `pattern_summary` (including the `enriched_trade_summary`
+text), `behavioral_audit`, and `dynamic_scenarios`. Claude does two things:
+validates/interprets the deterministic results AND discovers new patterns
+from the enriched trade data.
+
+### What Claude receives
+
+| Data | Format | Purpose |
+|---|---|---|
+| `enriched_trade_summary` | Text, one line per trade with regime context | **Primary input for AI pattern discovery** — Claude scans the full history |
+| `sequences` + `loops` | Structured JSON | Deterministic baseline — Claude confirms, overrides, or augments |
+| `temporal_drift` | Multi-scale windows with scores | Behavioral evolution data for narrative generation |
+| `calendar_patterns` | Structured JSON | Statistical findings for Claude to interpret |
+| `drawdown_responses` | Per-event response table | How client reacted to each market crisis |
+| `behavioral_audit` | Existing 9 detector results | Point-in-time findings |
+| `dynamic_scenarios` | Scenario results + reasons | Personalized what-if results |
+
+### AI Pattern Discovery (from enriched trades)
+
+Claude scans the `enriched_trade_summary` — the complete trade history with
+regime annotations — and looks for patterns that no detector was coded for.
+
+Examples of patterns only Claude can find:
+- **Cross-instrument flows**: "You redeem MFs 3-5 days before equity buys —
+  liquidating MFs to fund stock purchases on impulse"
+- **Symbol-specific habits**: "You've bought RELIANCE 11 times, always within
+  3 days of a >5% single-day drop, but hold only 45 days on average"
+- **Regime-behavior mismatch**: "You buy aggressively in bull regimes but go
+  completely silent during corrections — missing the best entry points"
+- **Position sizing shifts**: "Your trade sizes doubled after 2020 — larger
+  bets after early wins, classic overconfidence"
+- **Timing clusters**: "80% of your sells happen on Mondays — possible
+  weekend anxiety driving decisions"
+
+These patterns emerge from Claude reading the full enriched history. They
+are not pre-coded and will differ per client.
 
 ### Cross-Pattern Chain Reasoning
 
 Connects separate detectors and sequences into behavioral narratives:
 "You panic sell during crashes, sit in cash for 2-4 weeks, then FOMO buy back
 at higher prices. This 3-step cycle has cost ₹X over N occurrences."
-
-### Unanticipated Pattern Discovery
-
-Examines regime-tagged trades, calendar patterns, and drawdown responses to
-find patterns no detector was built for. Examples:
-- "Your trade frequency triples in Jan and Sep"
-- "You liquidate MFs to fund equity purchases on impulse"
-- "You consistently dip-buy RELIANCE but hold only 45 days"
 
 ### Context-Aware Severity Judgment
 
@@ -486,8 +590,11 @@ that missed a 40% recovery is devastating. Same flag, different judgment.
 
 ### Behavioral Evolution Narrative
 
-From temporal drift data, generates the story of how behavior changed over
-time: "Disciplined 2016-2018, deteriorated after 2020 crash, never recovered."
+From temporal drift data (especially `phase_windows` and `halves`), Claude
+generates the story of how behavior changed across market cycles:
+"You were disciplined during 2016-2019 (composite 7.2/10), but after the
+COVID crash your trading frequency tripled and never came back down.
+Your behavioral score has declined from 7.2 to 4.1 across two market cycles."
 
 ## MCP Integration
 
@@ -514,6 +621,19 @@ deep_analysis(client_name)
   → START with behavioral_audit or full_report_data for basic questions.
     Use deep_analysis when the user wants AI-driven insights or personalized
     scenarios beyond the standard report.
+  → Returns enriched_trade_summary (full trade history with market context),
+    coded pattern results, and dynamic scenario simulations.
+  → YOUR JOB after receiving deep_analysis results:
+    1. Review the coded patterns (sequences, loops, calendar) — confirm or
+       qualify them based on context
+    2. Scan the enriched_trade_summary for patterns the detectors missed —
+       look for cross-instrument flows, symbol-specific habits, timing
+       clusters, position sizing shifts, regime-behavior mismatches
+    3. Synthesize: connect coded + discovered patterns into a behavioral
+       narrative — what is this client's core tendency and how has it
+       evolved?
+    4. Present dynamic scenarios with the behavioral context — "because
+       you tend to X, we simulated what happens if you stopped"
 ```
 
 ## Data Requirements
