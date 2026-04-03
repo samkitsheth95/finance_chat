@@ -25,12 +25,41 @@ here to fetch live data. No web UI or REST API.
 Saves full market state to `data/daily/YYYY-MM-DD.json`. 61+ snapshots accumulated
 (Dec 2025 → present). Backfill script: `scripts/backfill_history.py`.
 
+## Portfolio Doctor MCP
+
+Second MCP server for behavioral portfolio analysis. Shares code with
+india-markets via the `shared/` package.
+
+| Component | File | What it does |
+|-----------|------|-------------|
+| CSV Parser | `portfolio_doctor/core/csv_parser.py` | Parse, validate, build trade ledger (FIFO equity, per-lot MF) |
+| Portfolio Engine | `portfolio_doctor/core/portfolio_engine.py` | Holdings, returns, XIRR, value series, allocation, tax drag |
+| Behavioral Engine | `portfolio_doctor/core/behavioral_engine.py` | 9 behavioral detectors + composite score |
+| Alternatives Engine | `portfolio_doctor/core/alternatives_engine.py` | 5 constant "what if" scenario comparisons |
+| Pattern Engine | `portfolio_doctor/core/pattern_engine.py` | Regime tagging, sequences, loops, temporal drift, calendar patterns, drawdown responses, enriched trade summary |
+| Scenario Engine | `portfolio_doctor/core/scenario_engine.py` | Behavior-corrected replay, regime-aware timing, discipline-enforced, SIP-through-crash, dynamic scenario selector |
+| MCP Server | `portfolio_doctor/server/app.py` | 8 tools: ingest, overview, audit, alternatives, action plan, full report, deep analysis, generate report |
+
+### Shared Utilities
+
+Code shared between india-markets and portfolio-doctor lives in `shared/`:
+
+| File | Source | What it does |
+|------|--------|-------------|
+| `shared/yf_client.py` | Extracted from `core/macro_client.py` | yfinance session, SSL bypass, caching, `yf_latest()` |
+| `shared/nse_utils.py` | Extracted from `core/fundamentals_client.py` | `nse_to_yf()` symbol mapping |
+| `shared/price_history.py` | New | Batch historical OHLC for any NSE stock |
+| `shared/mf_client.py` | New | MF NAV history via mftool |
+
 ## Key Decisions
 
 - **MCP over REST API** — developer uses Cursor daily; no separate UI needed
 - **Zerodha Kite Connect** — primary data source (paid, most reliable for NSE)
 - **NSE public scraping** — FII/DII flows via `nsepython` (free, no auth)
-- **No portfolio tracking** — pure market analysis tool
+- **No portfolio tracking in india-markets** — pure market analysis; portfolio features live in portfolio-doctor MCP
+- **Two MCPs, shared code** — portfolio-doctor reuses yfinance/mftool via `shared/` package
+- **Client data is local** — portfolio data in `data/portfolios/` (gitignored, sensitive)
+- **FIFO for equity, per-lot for MF** — matches Indian tax treatment conventions
 - **Selective context injection** — Claude decides which tools to call per question
 - **Signal scoring** — raw data → directional scores (-1 to +1) before Claude synthesizes
 - **Access token is manual** — Kite token expires daily, user provides it in `.env`
@@ -38,15 +67,23 @@ Saves full market state to `data/daily/YYYY-MM-DD.json`. 61+ snapshots accumulat
 ## Directory Layout
 
 ```
-core/          ← HTTP sessions, auth, instrument caches, signal scoring, daily store
-tools/         ← Business logic and derived signals (no MCP imports)
-server/app.py  ← MCP server: @mcp.tool() wrappers + system prompt instructions
-scripts/       ← Cron jobs, backfill, one-off utilities
-data/daily/    ← Daily JSON snapshots (gitignored; .gitkeep tracked)
+shared/          ← Shared utilities (yfinance, symbol mapping, price history, MF NAVs)
+core/            ← india-markets: HTTP sessions, auth, instrument caches, signal scoring
+tools/           ← india-markets: business logic and derived signals
+server/app.py    ← india-markets MCP server
+portfolio_doctor/
+├── core/        ← Analysis engines (csv_parser, portfolio, behavioral, alternatives)
+├── tools/       ← Portfolio Doctor business logic
+└── server/      ← Portfolio Doctor MCP server
+scripts/         ← Cron jobs, backfill, one-off utilities
+data/daily/      ← india-markets daily snapshots (gitignored)
+data/portfolios/ ← Client portfolio data (gitignored)
+tests/           ← Unit tests for shared/ and portfolio_doctor/
 ```
 
-Run via `.mcp.json`: `python -m server.app` — the `-m` flag adds the project root to
-`sys.path` so all `from core.x` and `from tools.x` imports work.
+Run via `.mcp.json`: `python -m server.app` (india-markets) or
+`python -m portfolio_doctor.server.app` (portfolio-doctor). The `-m` flag adds the
+project root to `sys.path` so all imports work.
 
 ---
 
@@ -148,3 +185,8 @@ Targeted fixes to the existing market-level scorer. Each is independent.
 3. Register each function as `@mcp.tool()` in `server/app.py` with a rich docstring
 4. Update system prompt `instructions` in `server/app.py` with when-to-call guidance
 5. Update this rule file's layer table and roadmap status
+
+### Portfolio Doctor tools follow the same pattern:
+1. Engine in `portfolio_doctor/core/<name>_engine.py`
+2. Tool wrapper in `portfolio_doctor/tools/<name>_tools.py`
+3. Register in `portfolio_doctor/server/app.py`

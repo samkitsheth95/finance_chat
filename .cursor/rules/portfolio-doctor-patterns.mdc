@@ -1,0 +1,89 @@
+---
+description: Patterns for portfolio-doctor MCP — applies when editing portfolio_doctor/ or shared/
+globs: portfolio_doctor/**/*.py, shared/*.py
+alwaysApply: false
+---
+
+# Portfolio Doctor Patterns
+
+## Architecture
+
+Portfolio Doctor follows the same three-layer pattern as india-markets:
+```
+portfolio_doctor/core/    ← Engines (pure computation, no I/O beyond file reads)
+portfolio_doctor/tools/   ← Orchestration (fetches data, calls engines, manages file cache)
+portfolio_doctor/server/  ← @mcp.tool() wrappers with docstrings
+```
+
+## Shared Code (shared/)
+
+Code reused across both MCPs. Neither MCP's core/ should import from the other.
+
+- `shared/yf_client.py` — yfinance session + caching (replaces inline code in core/macro_client.py)
+- `shared/nse_utils.py` — NSE symbol mapping (replaces inline code in core/fundamentals_client.py)
+- `shared/price_history.py` — batch OHLC for portfolio valuation
+- `shared/mf_client.py` — mutual fund NAV history via mftool
+
+## Client Data Storage
+
+Processed data lives in `data/portfolios/{client_name}/`:
+- `trades.json` — parsed and validated trades
+- `positions.json` — current position ledger
+- `cashflows.json` — unified cash flow timeline
+- `sip_patterns.json` — detected SIP patterns
+- `overview.json` — cached portfolio overview
+- `behavioral_audit.json` — cached behavioral analysis
+- `alternatives.json` — cached alternative scenarios
+- `pattern_summary.json` — regime-tagged trades, sequences, loops, drift, calendar, drawdown responses
+- `dynamic_scenarios.json` — personalized what-if scenario results
+
+Tools check for cached files before recomputing.
+
+## Behavioral Detector Pattern
+
+Every detector returns the same structure:
+```python
+{
+    "pattern": "detector_name",
+    "score": float,         # -1.0 (severe) to +1.0 (excellent)
+    "severity": str,        # "low" / "medium" / "high"
+    "instances": list,      # specific triggering trades
+    "cost_estimate": float, # estimated INR cost
+    "evidence_summary": str
+}
+```
+
+## Pattern Engine Functions
+
+All functions in `pattern_engine.py` are pure computation — no LLM calls,
+no network. Market data is passed in as dicts (`nifty_data`, `vix_data`,
+`stock_price_data`). The tools layer handles all data fetching.
+
+Regime tagging is stateful — computed sequentially across the full date range,
+not per-trade in isolation. The function walks `nifty_data` chronologically.
+
+## Scenario Engine Replay Pattern
+
+Behavior-corrected replay uses a 6-step pipeline:
+1. Filter trades (remove matching instances)
+2. Rebuild ledger via `csv_parser.build_position_ledger`
+3. Value positions at current prices
+4. Rebuild cash flows via `csv_parser.build_cash_flows`
+5. Compute XIRR via `portfolio_engine.compute_xirr`
+6. Compute totals
+
+All scenario results follow the `alternatives_engine` return shape convention.
+
+## MF Identifiers
+
+Mutual funds use AMFI scheme codes (e.g. 119551), NOT fund names.
+Validate scheme codes via `shared/mf_client.validate_scheme_code()`.
+
+## XIRR Calculation
+
+Use `scipy.optimize.brentq` via `portfolio_engine.compute_xirr()`.
+Cash flow convention: negative = money out (investment), positive = money in (redemption/current value).
+
+## Error Handling
+
+Same as india-markets: return `{"error": str}` dict on failure, never raise.
