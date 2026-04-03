@@ -43,6 +43,27 @@ New:
   Claude → cross-pattern chains, unanticipated patterns, severity judgment, narrative
 ```
 
+## Shared Data Types
+
+All market data inputs follow consistent shapes across both engines:
+
+| Parameter | Type | Shape | Example |
+|---|---|---|---|
+| `nifty_data` | `dict[str, float]` | date string → Nifty close | `{"2024-01-15": 21743.5, ...}` |
+| `vix_data` | `dict[str, float]` | date string → India VIX close | `{"2024-01-15": 14.2, ...}` |
+| `stock_price_data` | `dict[str, dict[str, float]]` | symbol → (date string → close) | `{"RELIANCE": {"2024-01-15": 2500.0, ...}}` |
+| `current_prices` | `dict[str, float]` | symbol → latest price/NAV | `{"RELIANCE": 1350.5, "119551": 103.88}` |
+| `mf_nav` | `dict[str, float]` | date string → NAV | `{"2024-01-15": 45.23, ...}` |
+| `actual_return` | `dict` | matches `alternatives_engine` | `{"final_value": float, "xirr": float, "total_invested": float}` |
+
+`stock_price_data` uses the same shape for equities and indices. Index
+tickers (e.g. `"NIFTY 50"`) use the same `symbol → dates → close` shape.
+The tools layer is responsible for fetching and converting to these shapes.
+
+When a date is missing from market data (weekend, holiday), functions use
+nearest available date within a ±5 day window (via `_nearest_value` helper).
+If no value found, the trade is skipped for that analysis with a warning.
+
 ## Pattern Engine (`portfolio_doctor/core/pattern_engine.py`)
 
 Deterministic enrichment of the trade history. All functions are pure
@@ -60,19 +81,31 @@ Added fields per trade:
 - `vix_level`: India VIX on trade date
 - `nifty_vs_200dma_pct`: Nifty % above/below 200 DMA
 
-Classification rules:
+Classification rules (evaluated in priority order — first match wins):
 
-| Condition | Regime |
-|---|---|
-| Nifty >10% below 52w peak AND VIX >20 | `crash` |
-| Nifty 5-10% below peak OR VIX 18-20 | `correction` |
-| Was in crash/correction within last 60 days, now rising | `recovery` |
-| Nifty <2% from 52w peak | `bull` |
-| Everything else | `sideways` |
+| Priority | Condition | Regime |
+|---|---|---|
+| 1 | Nifty >10% below running 52w peak AND VIX >20 | `crash` |
+| 2 | Nifty 5-10% below running 52w peak, OR VIX 18-20 (and not crash) | `correction` |
+| 3 | Prior regime (within last 60 days) was `crash` or `correction`, AND Nifty has risen >3% from the drawdown trough | `recovery` |
+| 4 | Nifty <2% below running 52w peak | `bull` |
+| 5 | Everything else | `sideways` |
 
-Inputs: `nifty_data` is `dict[str, float]` (date string → close).
-`vix_data` is `dict[str, float]` (date string → VIX close). Both fetched by
-the tools layer from Kite/yfinance.
+Regime tagging is **stateful** — computed sequentially across the date range,
+not per-trade in isolation. The function walks the full `nifty_data` series
+chronologically, maintaining running peak, prior regime, and trough level.
+Trades are then tagged by looking up the regime on their date.
+
+When VIX data is unavailable for a date, VIX-dependent conditions are skipped
+(crash requires drawdown >10% only; correction uses drawdown 5-10% only).
+
+**Note**: a day with Nifty >10% below peak but VIX <18 (calm VIX during
+structural decline) falls to `correction` via the drawdown-only path, not
+`sideways`. The VIX condition is additive, not required.
+
+**52-week peak**: rolling maximum of Nifty close over prior 252 trading days.
+**200 DMA**: simple moving average of prior 200 trading-day closes, computed
+from `nifty_data` directly (no external dependency).
 
 ### Sequence Detection
 
@@ -122,7 +155,7 @@ most recent half of occurrences exceeds the earlier half.
 
 ### Temporal Drift
 
-`compute_temporal_drift(trades, nifty_data, stock_price_data, window_months=12) → list[dict]`
+`compute_temporal_drift(trades, nifty_data, stock_price_data, window_months=12) → dict`
 
 Splits the client's full trading history into rolling windows (default 12
 months, sliding by 6 months). Runs a subset of existing behavioral detectors
@@ -132,32 +165,42 @@ per window:
 - `detect_fomo_buying` (buy near peaks)
 - `detect_herd_behavior` (buy after rallies)
 
-Returns per-window scores:
+Returns a single dict with two keys:
+
 ```python
 {
-    "period": "2020-H1",
-    "start_date": date,
-    "end_date": date,
-    "trade_count": int,
-    "scores": {
-        "overtrading": float,
-        "panic_selling": float,
-        "fomo_buying": float,
-        "herd_behavior": float,
+    "windows": [
+        {
+            "period": "2020-H1",
+            "start_date": date,
+            "end_date": date,
+            "trade_count": int,
+            "scores": {
+                "overtrading": float,
+                "panic_selling": float,
+                "fomo_buying": float,
+                "herd_behavior": float,
+            },
+            "composite": float,   # simple average of the 4 scores
+        },
+        ...
+    ],
+    "trend": {
+        "trend_direction": "worsening" | "improving" | "stable",
+        "worst_period": str,    # period label with lowest composite
+        "best_period": str,     # period label with highest composite
+        "inflection_points": list[str],  # period labels where composite changed direction by >0.2
     },
-    "composite": float,
 }
 ```
 
-Also computes trend metadata:
-```python
-{
-    "trend_direction": "worsening" | "improving" | "stable",
-    "worst_period": str,
-    "best_period": str,
-    "inflection_points": list,  # periods where score changed direction significantly
-}
-```
+The per-window `composite` is the simple average of the 4 detector scores
+(not the full 9-detector weighted composite from `behavioral_engine`).
+
+**Degraded mode**: if the client's history spans <18 months, only one window
+is produced (the full history). `trend` fields are set to `"stable"` with
+empty `inflection_points`. This avoids misleading trend analysis from
+insufficient data.
 
 ### Calendar Pattern Detection
 
@@ -169,7 +212,9 @@ Groups trades by:
 - Proximity to known events (budget: Feb 1, expiry: last Thu of month,
   quarter-end: Mar/Jun/Sep/Dec)
 
-Uses chi-squared test against uniform distribution. Patterns with p < 0.05:
+Uses chi-squared test against uniform distribution. Requires minimum 20 trades
+total and expected frequency ≥ 5 per bin (standard chi-squared validity).
+If trade count is too low, returns empty list. Patterns with p < 0.05:
 
 ```python
 {
@@ -186,7 +231,11 @@ Uses chi-squared test against uniform distribution. Patterns with p < 0.05:
 
 `build_drawdown_response_table(trades, nifty_data, threshold=0.05) → list[dict]`
 
-For every Nifty drawdown exceeding `threshold` during the client's history:
+For every distinct Nifty drawdown exceeding `threshold` during the client's
+history. A drawdown episode starts when Nifty falls below `threshold` from
+its running peak and ends when Nifty recovers to within 2% of the prior peak
+(or a new peak is set). Minimum 10 trading days between episodes to avoid
+counting the same correction multiple times.
 
 ```python
 {
@@ -235,20 +284,44 @@ Builds personalized what-if scenarios based on pattern engine output.
 
 ### Behavior-Corrected Replay
 
-`simulate_behavior_corrected(trades, pattern, current_prices, stock_price_data) → dict`
+`simulate_behavior_corrected(trades, pattern, instances, current_prices, stock_price_data) → dict`
 
-Replays the client's actual trade history but removes instances of a specific
-behavioral pattern.
+Replays the client's actual trade history but removes specific trade instances
+that match a behavioral pattern, then rebuilds the portfolio from scratch.
+
+**Inputs:**
+- `trades`: full trade list
+- `pattern`: pattern name (e.g. `"panic_selling"`)
+- `instances`: list of trade dicts to remove — sourced from either
+  `behavioral_audit["detectors"][pattern]["instances"]` or
+  `pattern_summary["sequences"]` (for sequence-type patterns like
+  `sell_then_rebuy_higher`). Each instance contains the trade(s) to remove,
+  identified by `date` + `symbol` + `action` + `amount`.
+- `current_prices`, `stock_price_data`: for valuation
+
+**Replay pipeline:**
+
+1. **Filter**: copy `trades` list, remove all trades matching instances
+   (matched by `date` + `symbol` + `action` + `amount` for disambiguation
+   when same-day duplicates exist)
+2. **Rebuild ledger**: pass filtered trades through `build_position_ledger()`
+   from `csv_parser` — this recomputes FIFO lots, avg cost, quantities
+3. **Value positions**: multiply each position's quantity by `current_prices`
+4. **Rebuild cash flows**: pass filtered trades through `build_cash_flows()`
+5. **Compute XIRR**: call `compute_xirr()` with rebuilt cash flows +
+   terminal value at today's date
+6. **Compute totals**: `total_invested` = sum of all inflow amounts in
+   filtered trades
 
 **How removal works per pattern type:**
 
-| Pattern | What "remove" means |
-|---|---|
-| `panic_selling` | Delete the sell trade. Client holds the position instead. Value at current price. |
-| `fomo_buying` | Delete the buy trade. Cash stays uninvested. Final value = remaining positions + saved cash. |
-| `herd_behavior` | Delete herd-flagged buys. Same as FOMO removal. |
-| `overtrading` | Remove round-trip pairs (buy+sell within 30 days). Hold from first buy. |
-| `sell_then_rebuy_higher` | Remove both the sell and rebuy. Hold from original buy. |
+| Pattern | What "remove" means | Instances source |
+|---|---|---|
+| `panic_selling` | Delete the sell trade(s). Client holds instead. | `behavioral_audit["detectors"]["panic_selling"]["instances"]` |
+| `fomo_buying` | Delete the buy trade(s). Cash stays uninvested. | `behavioral_audit["detectors"]["fomo_buying"]["instances"]` |
+| `herd_behavior` | Delete herd-flagged buys. Same as FOMO. | `behavioral_audit["detectors"]["herd_behavior"]["instances"]` |
+| `overtrading` | Remove both legs of round-trip pairs. Hold from first buy. | `behavioral_audit["detectors"]["overtrading"]["instances"]` |
+| `sell_then_rebuy_higher` | Remove both the sell and rebuy trades. | `pattern_summary["sequences"]` filtered by type |
 
 Return shape matches `alternatives_engine` conventions:
 ```python
@@ -259,23 +332,36 @@ Return shape matches `alternatives_engine` conventions:
     "total_invested": float,
     "final_value": float,
     "xirr": float,
-    "vs_actual": {"value_difference": float, ...},
-    "explanation": str,   # e.g. "Removed 5 panic sells, held positions instead"
+    "vs_actual": {
+        "value_difference": float,
+        "return_difference_pct": float,
+        "interpretation": str,
+    },
+    "explanation": str,
 }
 ```
 
 ### Regime-Aware Timing
 
-`simulate_regime_aware_buying(cash_flows, nifty_data, vix_data, stock_price_data, target_regime="correction") → dict`
+`simulate_regime_aware_buying(cash_flows, nifty_data, vix_data, target_regime="correction") → dict`
+
+Note: `stock_price_data` is not needed — all delayed buys route through the
+Nifty proxy NAV. Regime classification uses `nifty_data` + `vix_data` only.
 
 Same investment amounts as actual, but each buy is delayed until the next
 window where the market enters `target_regime`. If no qualifying window within
 90 calendar days, invest anyway (avoid cash drag distortion).
 
-Buys go into a Nifty proxy (same as `simulate_nifty_sip`). The point isn't
-stock selection — it's timing.
+**Investment vehicle**: all delayed buys go into a Nifty 50 proxy NAV (same
+as `simulate_nifty_sip`). The point is to measure the timing benefit, not
+stock selection. This applies uniformly to both equity and MF cash flows.
 
-Return shape: same as above with `"scenario": "regime_aware_timing"`.
+**MF-only clients**: scenario still runs — all SIP/BUY flows are treated
+the same. The comparison is "your actual timing vs correction-only timing"
+regardless of instrument type.
+
+Return shape: same as above with `"scenario": "regime_aware_timing"`,
+plus `"buys_delayed": int`, `"avg_delay_days": float`.
 
 ### Discipline-Enforced
 
@@ -323,15 +409,19 @@ Returns an ordered list of up to 3 scenario specs to execute:
 
 **Selection priority:**
 
-| Priority | Condition | Scenario |
-|---|---|---|
-| 1 (always) | Costliest loop or detector pattern | `behavior_corrected` targeting that pattern |
-| 2 | FOMO or panic detected with score ≤ -0.3 | `regime_aware_timing` targeting `correction` |
-| 3 (one of) | Overtrading score ≤ -0.3 | `discipline_enforced` with `max_trades_per_month=1` |
-| 3 (one of) | Herd behavior score ≤ -0.3 | `discipline_enforced` with `only_below_200dma` |
-| 3 (one of) | SIP discipline issues | `sip_through_crash` |
+| Priority | Condition | Scenario | Instance source |
+|---|---|---|---|
+| 1 (always) | Costliest pattern by `cost_estimate` — checked in order: (a) `pattern_summary["costliest_loop"]` if exists, (b) highest-cost detector from `behavioral_audit["detectors"]` | `behavior_corrected` | Loop: `pattern_summary["sequences"]` filtered by loop type. Detector: `behavioral_audit["detectors"][pattern]["instances"]` |
+| 2 | FOMO or panic score ≤ -0.3 in `behavioral_audit` | `regime_aware_timing` targeting `correction` | Uses `cash_flows` (no instances needed) |
+| 3 (one of) | Overtrading score ≤ -0.3 | `discipline_enforced` with `max_trades_per_month=1` | Replays full `trades` with rule filter |
+| 3 (one of) | Herd behavior score ≤ -0.3 | `discipline_enforced` with `only_below_200dma` | Replays full `trades` with rule filter |
+| 3 (one of) | SIP discipline issues (score ≤ -0.3 or `sip_stop_during_crash` sequences exist) | `sip_through_crash` | Uses `sip_patterns` + crash dates |
 
-If multiple priority-3 candidates, pick by highest estimated cost.
+If multiple priority-3 candidates, pick by highest `cost_estimate`.
+
+**No-pattern fallback**: if `behavioral_audit` shows no pattern with score
+≤ -0.3 and no loops exist, the selector returns 0 dynamic scenarios. The
+5 constant scenarios are always shown regardless.
 
 ### Orchestrator
 
@@ -438,14 +528,33 @@ deep_analysis(client_name)
 
 No new data sources required. All inputs come from existing infrastructure.
 
+Portfolio-doctor tools fetch VIX data via `shared/price_history.py` using
+yfinance `^INDIAVIX` (same infrastructure as india-markets but accessed
+through the shared package, not through india-markets MCP tools).
+
+## Edge Cases & Degraded Mode
+
+| Condition | Behavior |
+|---|---|
+| **Short history (<1 year)** | Regime tagging works (uses available Nifty data). Sequences may be empty. Temporal drift produces 1 window, trend = `"stable"`. Calendar patterns skipped (<20 trades). Dynamic scenarios may return 0 results. |
+| **MF-only client (no equities)** | Sequence types `sell_then_rebuy_higher` and `fomo_buy_then_loss` return empty (these require stock prices). `panic_sell_miss_recovery` still works for MF sells. `regime_aware_timing` and `sip_through_crash` work normally. `discipline_enforced` with `only_below_200dma` is skipped (no DMA for MFs). |
+| **Very few trades (<5)** | Pattern engine runs but most outputs are empty lists. No loops (need ≥2 occurrences). Calendar patterns skipped. `build_pattern_summary` returns valid structure with empty fields. |
+| **No patterns detected** | `select_dynamic_scenarios` returns empty list. Only the 5 constant scenarios are shown. Report omits the personalized section. |
+| **Missing VIX data** | Regime tagging uses Nifty drawdown only (VIX conditions dropped). Recovery detection uses drawdown recovery only. |
+
 ## Testing Strategy
 
 - **pattern_engine tests**: synthetic trade lists with known sequences embedded.
   Verify regime tagging, sequence detection, loop counting, temporal drift.
+  Include edge cases: short history, MF-only, no trades in a window.
 - **scenario_engine tests**: replay known trade histories with removed patterns.
-  Verify that holdings/values recalculate correctly.
+  Behavior-corrected replay must use the same `build_position_ledger` and
+  `compute_xirr` code paths as production — not hand-rolled totals. Verify
+  that removing a panic sell correctly rebuilds FIFO lots and cash flows.
+- **Scenario selector tests**: verify priority ordering, fallback to 0 dynamic
+  scenarios when no patterns detected, correct instance source mapping.
 - **Integration test**: full pipeline from CSV → pattern summary → dynamic
-  scenarios with mocked market data.
+  scenarios with mocked market data. Verify JSON output shapes match spec.
 
 ## Future: Cross-Client Patterns (not built now)
 
