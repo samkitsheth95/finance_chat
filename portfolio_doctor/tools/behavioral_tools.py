@@ -122,7 +122,7 @@ def get_behavioral_audit(client_name: str) -> dict:
         ))
         stock_data = _fetch_stock_data(equity_symbols, lookback_start, end_date)
 
-        current_prices, _ = _fetch_current_prices(positions)
+        current_prices, _, _ = _fetch_current_prices(positions)
         holdings_for_concentration: dict[str, dict] = {}
         total_value = 0.0
         for sym, pos in positions.items():

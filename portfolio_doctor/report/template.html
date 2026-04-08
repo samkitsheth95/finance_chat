@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Portfolio Report</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+:root {
+  --bg: #0c0f14;
+  --surface: #161b24;
+  --surface2: #1e2533;
+  --border: #2a3244;
+  --text: #e4e8ef;
+  --text2: #8b95a8;
+  --accent: #4fd1c5;
+  --red: #f56565;
+  --green: #48bb78;
+  --amber: #ecc94b;
+  --blue: #63b3ed;
+  --purple: #b794f4;
+  --pink: #f687b3;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: var(--bg); color: var(--text); font-family: 'Inter', -apple-system, sans-serif; line-height: 1.6; padding: 2rem; max-width: 1200px; margin: 0 auto; }
+h1 { font-family: 'DM Serif Display', serif; font-size: 2.4rem; color: var(--accent); margin-bottom: 0.25rem; }
+h2 { font-family: 'DM Serif Display', serif; font-size: 1.5rem; color: var(--text); margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+h3 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text2); margin-bottom: 0.75rem; font-weight: 600; }
+.subtitle { color: var(--text2); font-size: 0.95rem; margin-bottom: 2rem; }
+.grid { display: grid; gap: 1.25rem; }
+.grid-2 { grid-template-columns: 1fr 1fr; }
+.grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+.grid-4 { grid-template-columns: 1fr 1fr 1fr 1fr; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem; }
+.stat-value { font-size: 2rem; font-weight: 700; line-height: 1.2; }
+.stat-label { font-size: 0.8rem; color: var(--text2); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 0.25rem; }
+.stat-sub { font-size: 0.85rem; color: var(--text2); margin-top: 0.25rem; }
+.positive { color: var(--green); }
+.negative { color: var(--red); }
+.neutral { color: var(--amber); }
+.section { margin-bottom: 3rem; }
+.tag { display: inline-block; padding: 0.2rem 0.6rem; border-radius: 6px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
+.tag-red { background: rgba(245,101,101,0.15); color: var(--red); }
+.tag-green { background: rgba(72,187,120,0.15); color: var(--green); }
+.tag-amber { background: rgba(236,201,75,0.15); color: var(--amber); }
+.radar-wrap { display: flex; align-items: center; gap: 2rem; }
+.radar-chart { flex: 0 0 280px; height: 280px; }
+.radar-legend { flex: 1; }
+.bar-row { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem; }
+.bar-label { width: 140px; font-size: 0.82rem; color: var(--text2); text-align: right; flex-shrink: 0; }
+.bar-track { flex: 1; height: 28px; background: var(--surface2); border-radius: 6px; overflow: hidden; position: relative; }
+.bar-fill { height: 100%; border-radius: 6px; display: flex; align-items: center; padding: 0 8px; font-size: 0.75rem; font-weight: 600; min-width: 32px; }
+.issue-card { background: var(--surface2); border-radius: 10px; padding: 1.25rem; margin-bottom: 1rem; }
+.issue-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+.issue-name { font-weight: 600; font-size: 0.95rem; }
+.issue-cost { font-weight: 700; color: var(--red); }
+.issue-evidence { color: var(--text2); font-size: 0.85rem; }
+.scenario-row { display: grid; grid-template-columns: 1.5fr 1fr 1fr 1fr 1fr; align-items: center; padding: 0.85rem 1rem; border-bottom: 1px solid var(--border); font-size: 0.88rem; }
+.scenario-header { font-weight: 600; color: var(--text2); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.scenario-name { font-weight: 600; }
+.action-list { list-style: none; }
+.action-list li { padding: 0.85rem 1rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; font-size: 0.9rem; }
+.action-list li:last-child { border-bottom: none; }
+.action-amount { font-weight: 700; white-space: nowrap; margin-left: 1rem; }
+canvas { max-width: 100%; }
+.chart-container { position: relative; height: 320px; }
+.donut-wrap { display: flex; align-items: center; gap: 2rem; }
+.donut-chart { flex: 0 0 200px; height: 200px; }
+.donut-legend { flex: 1; }
+.legend-item { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; font-size: 0.88rem; }
+.legend-dot { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
+@media (max-width: 768px) {
+  .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+  .radar-wrap, .donut-wrap { flex-direction: column; }
+  body { padding: 1rem; }
+}
+</style>
+</head>
+<body>
+<header class="section"><h1>Portfolio Report</h1><div class="subtitle" id="header-sub"></div></header>
+<section class="section"><h2>Snapshot</h2><div class="grid grid-4" id="snapshot-grid"></div></section>
+<section class="section"><h2>Holdings</h2><div class="grid grid-2" id="holdings-grid"></div></section>
+<section class="section"><h2>Equity Curve</h2><div class="card"><div class="chart-container"><canvas id="equityCurveChart"></canvas></div></div></section>
+<section class="section"><h2>Allocation</h2><div class="card"><div class="donut-wrap"><div class="donut-chart"><canvas id="allocationChart"></canvas></div><div class="donut-legend" id="alloc-legend"></div></div></div></section>
+<section class="section"><h2>Behavioral Analysis</h2><div class="card"><div class="radar-wrap"><div class="radar-chart"><canvas id="radarChart"></canvas></div><div class="radar-legend"><h3>Dimension Scores (0–10)</h3><div id="radarBars"></div></div></div></div><div style="margin-top:1.25rem"><h3>Top Issues</h3><div id="issues-list"></div></div></section>
+<section class="section"><h2>What-If Scenarios</h2><div class="card" style="padding:0;overflow:hidden" id="scenarios-table"></div></section>
+<section class="section"><h2>Action Plan</h2><div class="grid grid-2" id="action-plan-grid"></div></section>
+
+<!--REPORT_DATA_PLACEHOLDER-->
+
+<script>
+const D = window.REPORT_DATA || {};
+const S = D.snapshot || {};
+const B = D.behavioral || {};
+const A = D.alternatives || {};
+const AL = D.allocation || {};
+const AP = D.action_plan || {};
+const EC = D.equity_curve || {};
+
+const INR = v => {
+  if (v == null) return '—';
+  const abs = Math.abs(Math.round(v));
+  const s = abs.toLocaleString('en-IN');
+  return v < 0 ? `-₹${s}` : `₹${s}`;
+};
+const PCT = v => v != null ? (v >= 0 ? '+' : '') + v.toFixed(1) + '%' : '—';
+const CLS = v => v > 0 ? 'positive' : v < 0 ? 'negative' : 'neutral';
+const SCENARIO_LABELS = {
+  nifty_50_sip: 'Nifty 50 SIP', popular_mf_sip: 'Popular MF SIP',
+  model_70_30: '70/30 Model', buy_and_hold: 'Buy & Hold', no_reentry: 'No Re-entry'
+};
+const PATTERN_LABELS = {
+  panic_selling: 'Panic Selling', fomo_buying: 'FOMO Buying',
+  disposition_effect: 'Disposition Effect', overtrading: 'Overtrading',
+  concentration_risk: 'Concentration Risk', herd_behavior: 'Herd Behavior',
+  anchoring_bias: 'Anchoring Bias', sip_discipline: 'SIP Discipline',
+  regular_plan_waste: 'Regular Plan Waste'
+};
+
+// --- Header ---
+const firstDate = new Date(S.trading_since || '2024-01-01');
+const mo = firstDate.toLocaleString('en-IN', { month: 'short', year: 'numeric' });
+document.getElementById('header-sub').innerHTML =
+  `Client <strong>${D.client_name || ''}</strong> · Trading since ${mo} · ${S.duration_years || 0} years · Generated ${new Date().toLocaleString('en-IN', { month: 'short', year: 'numeric' })}`;
+document.title = `Portfolio Report — ${D.client_name || ''}`;
+
+// --- Snapshot ---
+const absRet = (S.current_value || 0) - (S.total_invested || 0);
+const retPct = S.total_invested > 0 ? (absRet / S.total_invested * 100) : 0;
+const xirrPct = ((S.xirr || 0) * 100);
+const bScore = S.behavioral_score_0_10 || 0;
+const bLabel = bScore >= 7 ? 'Good' : bScore >= 5 ? 'Average' : 'Below average';
+document.getElementById('snapshot-grid').innerHTML = `
+  <div class="card"><div class="stat-value">${INR(S.current_value)}</div><div class="stat-label">Current Value</div><div class="stat-sub">Invested ${INR(S.total_invested)}</div></div>
+  <div class="card"><div class="stat-value ${CLS(absRet)}">${absRet >= 0 ? '+' : ''}${INR(absRet)}</div><div class="stat-label">Absolute Return</div><div class="stat-sub">${PCT(retPct)}</div></div>
+  <div class="card"><div class="stat-value neutral">${xirrPct.toFixed(1)}%</div><div class="stat-label">XIRR</div><div class="stat-sub">Annualized</div></div>
+  <div class="card"><div class="stat-value" style="color:var(--amber)">${bScore.toFixed(1)}<span style="font-size:1rem;color:var(--text2)">/10</span></div><div class="stat-label">Behavioral Score</div><div class="stat-sub">${bLabel}</div></div>`;
+
+// --- Holdings ---
+const holdings = AL.holdings || [];
+document.getElementById('holdings-grid').innerHTML = holdings.map(h => {
+  const cls = CLS(h.return_pct);
+  const name = h.display_name || h.symbol;
+  const typeLabel = h.instrument_type === 'MF' ? 'Mutual Fund' : 'Equity';
+  const qty = h.qty || 0;
+  const qtyLabel = h.instrument_type === 'MF' ? `${qty} units` : `${qty} shares`;
+  const priceLabel = h.instrument_type === 'MF'
+    ? `NAV ₹${(h.current_price || 0).toLocaleString('en-IN', {maximumFractionDigits: 2})}`
+    : `Avg ₹${(h.avg_cost || 0).toLocaleString('en-IN')} → ₹${(h.current_price || 0).toLocaleString('en-IN')}`;
+  return `<div class="card">
+    <h3>${name} · ${typeLabel}</h3>
+    <div style="display:flex;justify-content:space-between;align-items:baseline">
+      <div class="stat-value ${cls}">${PCT(h.return_pct)}</div>
+      <div style="text-align:right">
+        <div style="font-size:0.88rem;font-weight:600">${qtyLabel}</div>
+        <div style="font-size:0.82rem;color:var(--text2)">${priceLabel}</div>
+      </div>
+    </div>
+    <div style="margin-top:0.75rem;display:flex;justify-content:space-between;font-size:0.85rem;color:var(--text2)">
+      <span>Invested ${INR(h.invested)}</span><span class="${cls}">Value ${INR(h.current_value)}</span>
+    </div></div>`;
+}).join('');
+
+// --- Equity Curve ---
+function drawEquityCurve() {
+  const actual = EC.actual || [];
+  const nifty = EC.nifty_sip || [];
+  const sample = (arr, n) => {
+    if (arr.length <= n) return arr;
+    const step = Math.floor(arr.length / n);
+    return arr.filter((_, i) => i % step === 0 || i === arr.length - 1);
+  };
+  const sa = sample(actual, 200);
+  const sn = sample(nifty, 200);
+  if (!sa.length) return;
+  new Chart(document.getElementById('equityCurveChart'), {
+    type: 'line',
+    data: {
+      labels: sa.map(d => d.date),
+      datasets: [
+        { label: 'Actual Portfolio', data: sa.map(d => d.value), borderColor: '#4fd1c5', backgroundColor: 'rgba(79,209,197,0.08)', fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2 },
+        { label: 'Nifty 50 SIP', data: sn.map(d => d.value), borderColor: '#b794f4', backgroundColor: 'transparent', fill: false, tension: 0.3, pointRadius: 0, borderWidth: 2, borderDash: [6, 3] }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { labels: { color: '#8b95a8', font: { family: 'Inter' } } }, tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ₹${ctx.parsed.y.toLocaleString('en-IN')}` } } },
+      scales: {
+        x: { ticks: { color: '#8b95a8', maxTicksLimit: 8, font: { size: 11 } }, grid: { color: 'rgba(42,50,68,0.5)' } },
+        y: { ticks: { color: '#8b95a8', font: { size: 11 }, callback: v => '₹' + (v / 1000).toFixed(0) + 'k' }, grid: { color: 'rgba(42,50,68,0.5)' } }
+      }
+    }
+  });
+}
+
+// --- Allocation ---
+function drawAllocation() {
+  const sectors = AL.sectors || [];
+  if (!sectors.length) return;
+  const COLORS = ['#4fd1c5', '#b794f4', '#f687b3', '#63b3ed', '#ecc94b', '#48bb78', '#f56565'];
+  new Chart(document.getElementById('allocationChart'), {
+    type: 'doughnut',
+    data: {
+      labels: sectors.map(s => s.name),
+      datasets: [{ data: sectors.map(s => s.weight_pct), backgroundColor: COLORS.slice(0, sectors.length), borderColor: '#161b24', borderWidth: 3 }]
+    },
+    options: { responsive: true, maintainAspectRatio: true, cutout: '65%', plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => `${ctx.label}: ${ctx.parsed.toFixed(1)}%` } } } }
+  });
+  const turnover = S.turnover_ratio || 0;
+  const turnLabel = turnover > 1 ? 'high churning' : turnover > 0.5 ? 'moderate' : 'low';
+  document.getElementById('alloc-legend').innerHTML =
+    sectors.map((s, i) => `<div class="legend-item"><div class="legend-dot" style="background:${COLORS[i]}"></div> ${s.name} — ${s.weight_pct.toFixed(0)}%</div>`).join('') +
+    `<div style="margin-top:1rem;font-size:0.85rem;color:var(--text2)"><div>Turnover Ratio: <strong style="color:${turnover > 1 ? 'var(--red)' : 'var(--text)'}">${turnover.toFixed(2)}×</strong> (${turnLabel})</div><div>Tax Drag: <strong>${INR(S.tax_drag_estimate)}</strong></div></div>`;
+}
+
+// --- Behavioral Radar ---
+function drawRadar() {
+  const radar = B.radar || {};
+  const LABELS = { timing_discipline: 'Timing', holding_discipline: 'Holding', diversification: 'Diversification', trading_discipline: 'Trading', crowd_independence: 'Independence', sip_consistency: 'SIP' };
+  const BAR_COLORS = { Timing: '--blue', Holding: '--accent', Diversification: '--purple', Trading: '--amber', Independence: '--pink', SIP: '--green' };
+  const dims = {};
+  for (const [key, label] of Object.entries(LABELS)) dims[label] = radar[key] || 5.0;
+
+  new Chart(document.getElementById('radarChart'), {
+    type: 'radar',
+    data: { labels: Object.keys(dims), datasets: [{ data: Object.values(dims), backgroundColor: 'rgba(79,209,197,0.15)', borderColor: '#4fd1c5', borderWidth: 2, pointBackgroundColor: '#4fd1c5', pointRadius: 4 }] },
+    options: { responsive: true, maintainAspectRatio: true, plugins: { legend: { display: false } }, scales: { r: { min: 0, max: 10, ticks: { stepSize: 2, color: '#8b95a8', backdropColor: 'transparent', font: { size: 10 } }, grid: { color: 'rgba(42,50,68,0.6)' }, pointLabels: { color: '#e4e8ef', font: { size: 12, family: 'Inter' } }, angleLines: { color: 'rgba(42,50,68,0.6)' } } } }
+  });
+  const barsEl = document.getElementById('radarBars');
+  barsEl.innerHTML = Object.entries(dims).map(([name, val]) => {
+    const c = `var(${BAR_COLORS[name] || '--accent'})`;
+    return `<div class="bar-row"><div class="bar-label">${name}</div><div class="bar-track"><div class="bar-fill" style="width:${val * 10}%;background:${c}">${val.toFixed(1)}</div></div></div>`;
+  }).join('');
+}
+
+// --- Top Issues ---
+const issues = B.top_issues || [];
+document.getElementById('issues-list').innerHTML = issues.map(iss => {
+  const tagCls = iss.severity === 'high' ? 'tag-red' : iss.severity === 'medium' ? 'tag-amber' : 'tag-green';
+  const name = PATTERN_LABELS[iss.pattern] || iss.pattern;
+  return `<div class="issue-card"><div class="issue-header"><div><span class="issue-name">${name}</span> <span class="tag ${tagCls}">${iss.severity}</span></div><div class="issue-cost">Cost ${INR(iss.cost_estimate)}</div></div><div class="issue-evidence">${iss.evidence_summary || ''}</div></div>`;
+}).join('') || '<div style="color:var(--text2);padding:1rem">No significant issues detected.</div>';
+
+// --- Scenarios ---
+const scenarios = A.scenarios || [];
+let scenHtml = `<div class="scenario-row scenario-header"><div>Scenario</div><div>Invested</div><div>Final Value</div><div>XIRR</div><div>vs Actual</div></div>`;
+scenHtml += `<div class="scenario-row" style="background:var(--surface2)"><div class="scenario-name" style="color:var(--accent)">Actual Portfolio</div><div>${INR(S.total_invested)}</div><div>${INR(S.current_value)}</div><div>${xirrPct.toFixed(1)}%</div><div>—</div></div>`;
+scenarios.forEach(sc => {
+  const diff = sc.vs_actual_value_diff || 0;
+  const cls = CLS(diff);
+  const diffStr = diff === 0 ? '—' : `<span class="${cls}" style="font-weight:700">${diff > 0 ? '+' : ''}${INR(diff)}</span>`;
+  scenHtml += `<div class="scenario-row"><div class="scenario-name">${SCENARIO_LABELS[sc.scenario] || sc.scenario}</div><div>${INR(sc.total_invested)}</div><div>${INR(sc.final_value)}</div><div>${(sc.xirr * 100).toFixed(1)}%</div><div>${diffStr}</div></div>`;
+});
+document.getElementById('scenarios-table').innerHTML = scenHtml;
+
+// --- Action Plan ---
+const startItems = (AP.start || []).map(a => `<li><span>${a.action}</span><span class="action-amount positive">+${INR(a.benefit_inr)}</span></li>`).join('');
+const stopItems = (AP.stop || []).map(a => `<li><span>${a.action}</span><span class="action-amount negative">-${INR(a.cost_inr)}</span></li>`).join('');
+const keepItems = (AP.keep || []).map(a => `<li><span>${a.action}</span></li>`).join('');
+let apHtml = '';
+if (startItems || stopItems) {
+  if (startItems) apHtml += `<div class="card" style="border-color:rgba(72,187,120,0.3)"><h3 style="color:var(--green)">▲ Start Doing</h3><ul class="action-list">${startItems}</ul></div>`;
+  if (stopItems) apHtml += `<div class="card" style="border-color:rgba(245,101,101,0.3)"><h3 style="color:var(--red)">■ Stop Doing</h3><ul class="action-list">${stopItems}</ul></div>`;
+} else {
+  apHtml = '<div class="card" style="grid-column:1/-1;color:var(--text2)">No recommendations generated yet.</div>';
+}
+if (keepItems) apHtml += `<div class="card" style="border-color:rgba(79,209,197,0.3);grid-column:1/-1"><h3 style="color:var(--accent)">✓ Keep Doing</h3><ul class="action-list">${keepItems}</ul></div>`;
+document.getElementById('action-plan-grid').innerHTML = apHtml;
+
+drawEquityCurve();
+drawAllocation();
+drawRadar();
+</script>
+</body>
+</html>

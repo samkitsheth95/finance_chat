@@ -7,6 +7,7 @@ Used by portfolio-doctor for:
 """
 from __future__ import annotations
 
+import os
 from datetime import date
 from typing import Optional
 
@@ -18,7 +19,22 @@ _mf = None
 def _get_mf() -> Mf:
     global _mf
     if _mf is None:
-        _mf = Mf()
+        if os.getenv("KITE_SSL_VERIFY", "true").lower() == "false":
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            import requests as _req
+            _orig = _req.session
+            def _nossl_session():
+                s = _orig()
+                s.verify = False
+                return s
+            _req.session = _nossl_session
+            try:
+                _mf = Mf()
+            finally:
+                _req.session = _orig
+        else:
+            _mf = Mf()
     return _mf
 
 

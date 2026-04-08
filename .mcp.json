@@ -9,6 +9,16 @@
       "env": {
         "KITE_SSL_VERIFY": "false"
       }
+    },
+    "portfolio-doctor": {
+      "command": ".venv/bin/python",
+      "args": [
+        "-m",
+        "portfolio_doctor.server.app"
+      ],
+      "env": {
+        "KITE_SSL_VERIFY": "false"
+      }
     }
   }
 }

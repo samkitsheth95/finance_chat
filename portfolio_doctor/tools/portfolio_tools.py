@@ -25,7 +25,7 @@ from portfolio_doctor.core.portfolio_engine import (
     compute_tax_drag,
 )
 from shared.nse_utils import nse_to_yf
-from shared.yf_client import yf_latest
+from shared.yf_client import yf_latest, get_yf_session
 
 PORTFOLIO_DIR = Path("data/portfolios")
 
@@ -122,32 +122,40 @@ def ingest_client_trades(csv_path: str, client_name: str) -> dict:
 
 def _fetch_current_prices(
     positions: dict,
-) -> tuple[dict[str, float], dict[str, str]]:
+) -> tuple[dict[str, float], dict[str, str], list[str]]:
     """Fetch current prices and sector map for all held positions.
 
     Returns:
-        (current_prices, sector_map) where:
+        (current_prices, sector_map, errors) where:
         - current_prices: {symbol: price_or_nav}
         - sector_map: {symbol: sector_name} (equity only)
+        - errors: list of error messages for failed fetches
     """
     import yfinance as yf
     from shared.mf_client import get_nav_series
 
     current_prices: dict[str, float] = {}
     sector_map: dict[str, str] = {}
+    errors: list[str] = []
 
     for sym, pos in positions.items():
         if pos["instrument_type"] == "EQUITY":
             try:
                 ticker_str = nse_to_yf(sym)
                 data = yf_latest(ticker_str)
-                if data.get("price") is not None:
+                if data.get("error"):
+                    errors.append(f"{sym}: yf_latest failed — {data['error']}")
+                elif data.get("price") is not None:
                     current_prices[sym] = data["price"]
+                else:
+                    errors.append(f"{sym}: yf_latest returned no price")
 
-                t = yf.Ticker(ticker_str)
+                session = get_yf_session()
+                t = yf.Ticker(ticker_str, session=session) if session else yf.Ticker(ticker_str)
                 info = t.info or {}
                 sector_map[sym] = info.get("sector", "Unknown")
-            except Exception:
+            except Exception as e:
+                errors.append(f"{sym}: equity price fetch error — {e}")
                 sector_map[sym] = "Unknown"
 
         elif pos["instrument_type"] == "MF":
@@ -159,10 +167,12 @@ def _fetch_current_prices(
                 if series:
                     latest_date = max(series.keys())
                     current_prices[sym] = series[latest_date]
-            except Exception:
-                pass
+                else:
+                    errors.append(f"{sym}: get_nav_series returned empty")
+            except Exception as e:
+                errors.append(f"{sym}: MF NAV fetch error — {e}")
 
-    return current_prices, sector_map
+    return current_prices, sector_map, errors
 
 
 # ---------------------------------------------------------------------------
@@ -188,7 +198,7 @@ def get_portfolio_overview(client_name: str) -> dict:
         positions = _load_json(cdir / "positions.json")
         as_of = date.today()
 
-        current_prices, sector_map = _fetch_current_prices(positions)
+        current_prices, sector_map, price_errors = _fetch_current_prices(positions)
 
         returns = compute_returns(trades, current_prices, as_of)
 
@@ -220,6 +230,8 @@ def get_portfolio_overview(client_name: str) -> dict:
             "turnover_ratio": turnover,
             "tax_drag": tax_drag,
         }
+        if price_errors:
+            result["price_fetch_errors"] = price_errors
 
         _save_json(cdir / "overview.json", result)
         return result

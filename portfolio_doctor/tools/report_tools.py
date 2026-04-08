@@ -463,11 +463,22 @@ def _build_allocation(overview: dict) -> dict:
     for h in overview.get("holdings", []):
         val = h.get("current_value", 0.0)
         weight = (val / total_value * 100) if total_value > 0 else 0.0
+        display_name = h.get("scheme_name") or h.get("symbol", "")
+        is_mf = h.get("instrument_type") == "MF"
+        qty = h.get("total_quantity") if is_mf else h.get("quantity", 0)
+        price = h.get("current_nav") if is_mf else h.get("current_price", 0)
+        avg = h.get("avg_cost", 0) or 0
         holdings.append({
             "symbol": h.get("symbol", ""),
+            "display_name": display_name,
+            "instrument_type": h.get("instrument_type", "EQUITY"),
             "weight_pct": round(weight, 1),
             "return_pct": h.get("return_pct", 0.0),
-            "holding_days": h.get("holding_days", 0),
+            "current_value": round(val, 2),
+            "invested": round(h.get("invested", 0.0), 2),
+            "qty": qty or 0,
+            "avg_cost": round(avg, 2),
+            "current_price": round(price or 0, 2),
         })
 
     return {"sectors": sectors, "types": types, "holdings": holdings}
@@ -579,3 +590,67 @@ def _call_behavioral(client_name: str) -> dict:
 def _call_alternatives(client_name: str) -> dict:
     from portfolio_doctor.tools.alternative_tools import get_alternative_scenarios
     return get_alternative_scenarios(client_name)
+
+
+# ---------------------------------------------------------------------------
+# HTML Report Generator
+# ---------------------------------------------------------------------------
+
+_TEMPLATE_PATH = Path(__file__).resolve().parent.parent / "report" / "template.html"
+
+
+def _sample_curve(points: list[dict], max_points: int = 200) -> list[dict]:
+    """Downsample equity-curve points for embedding in HTML."""
+    if len(points) <= max_points:
+        return points
+    step = len(points) // max_points
+    sampled = [points[i] for i in range(0, len(points), step)]
+    if sampled[-1] != points[-1]:
+        sampled.append(points[-1])
+    return sampled
+
+
+def generate_report_html(client_name: str) -> dict:
+    """Generate a standalone HTML report for a client.
+
+    Calls full_report_data if not cached, embeds the JSON into the HTML
+    template, and saves to data/portfolios/{client_name}/report.html.
+
+    Returns {"client_name", "path", "status"} or {"error"}.
+    """
+    import json as _json
+
+    cdir = PORTFOLIO_DIR / client_name
+    report_path = cdir / "full_report.json"
+
+    if report_path.exists():
+        report_data = _load_json(report_path)
+    else:
+        report_data = get_full_report_data(client_name)
+
+    if "error" in report_data:
+        return report_data
+
+    ec = report_data.get("equity_curve", {})
+    report_data["equity_curve"] = {
+        "actual": _sample_curve(ec.get("actual", [])),
+        "nifty_sip": _sample_curve(ec.get("nifty_sip", [])),
+        "markers": ec.get("markers", []),
+    }
+
+    template = _TEMPLATE_PATH.read_text(encoding="utf-8")
+    data_script = (
+        "<script>\nwindow.REPORT_DATA = "
+        + _json.dumps(report_data, default=str)
+        + ";\n</script>"
+    )
+    html = template.replace("<!--REPORT_DATA_PLACEHOLDER-->", data_script)
+
+    out_path = cdir / "report.html"
+    out_path.write_text(html, encoding="utf-8")
+
+    return {
+        "client_name": client_name,
+        "path": str(out_path.resolve()),
+        "status": "generated",
+    }

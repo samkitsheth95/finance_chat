@@ -182,7 +182,7 @@ class TestGetPortfolioOverview:
         )
         monkeypatch.setattr(
             "portfolio_doctor.tools.portfolio_tools._fetch_current_prices",
-            lambda positions: ({"RELIANCE": 2000.0}, {"RELIANCE": "Technology"}),
+            lambda positions: ({"RELIANCE": 2000.0}, {"RELIANCE": "Technology"}, []),
         )
 
         result = get_portfolio_overview("test_client")
@@ -205,7 +205,7 @@ class TestGetPortfolioOverview:
         )
         monkeypatch.setattr(
             "portfolio_doctor.tools.portfolio_tools._fetch_current_prices",
-            lambda positions: ({"RELIANCE": 2000.0}, {"RELIANCE": "Technology"}),
+            lambda positions: ({"RELIANCE": 2000.0}, {"RELIANCE": "Technology"}, []),
         )
 
         result = get_portfolio_overview("test_client")
@@ -224,7 +224,7 @@ class TestGetPortfolioOverview:
         )
         monkeypatch.setattr(
             "portfolio_doctor.tools.portfolio_tools._fetch_current_prices",
-            lambda positions: ({"RELIANCE": 2000.0}, {"RELIANCE": "Energy"}),
+            lambda positions: ({"RELIANCE": 2000.0}, {"RELIANCE": "Energy"}, []),
         )
 
         result = get_portfolio_overview("test_client")
@@ -242,7 +242,7 @@ class TestGetPortfolioOverview:
         )
         monkeypatch.setattr(
             "portfolio_doctor.tools.portfolio_tools._fetch_current_prices",
-            lambda positions: ({"RELIANCE": 2000.0}, {"RELIANCE": "Technology"}),
+            lambda positions: ({"RELIANCE": 2000.0}, {"RELIANCE": "Technology"}, []),
         )
 
         get_portfolio_overview("test_client")
@@ -284,7 +284,7 @@ class TestGetPortfolioOverview:
         )
         monkeypatch.setattr(
             "portfolio_doctor.tools.portfolio_tools._fetch_current_prices",
-            lambda positions: ({"119551": 40.0}, {}),
+            lambda positions: ({"119551": 40.0}, {}, []),
         )
 
         result = get_portfolio_overview("test_mf")

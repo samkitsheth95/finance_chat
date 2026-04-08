@@ -16,5 +16,8 @@ data/daily/*.json
 # Client portfolio data (contains trading history)
 data/portfolios/
 
+# Temporary files
+tmp/
+
 # README notes for collaborators: run this to recreate the venv:
 # python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
